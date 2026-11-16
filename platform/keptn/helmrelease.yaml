@@ -1,0 +1,67 @@
+# Keptn lifecycle operator, metrics operator and certificate operator.
+# Chart keptn 0.11.0 is the Keptn v2.5.0 release; it deploys lifecycle-operator v2.0.0,
+# metrics-operator v2.1.0 and certificate-operator v3.0.0. Every image is pinned by digest,
+# including the Deno and Python task runtimes the lifecycle operator starts for KeptnTasks.
+# These pins belong to the chart version: when the chart is bumped, take the image tags from
+# its values.yaml and resolve their digests again (e.g. crane digest ghcr.io/keptn/<image>:<tag>).
+#
+# Light profile: the three operators request 20m CPU and 144Mi memory in total and are limited
+# to 320Mi (these are the chart defaults, stated here so they are visible and reviewable).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: keptn
+  namespace: keptn-system
+spec:
+  interval: 30m
+  timeout: 10m
+  chart:
+    spec:
+      chart: keptn
+      version: "0.11.0"                      # Keptn v2.5.0
+      sourceRef:
+        kind: HelmRepository
+        name: keptn
+        namespace: flux-system
+  # The Keptn CRDs are regular templates in the subcharts (not in a crds/ directory), so Helm
+  # creates and upgrades them with the release. The crds policies below cover any chart
+  # version that moves them to crds/.
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    lifecycleOperator:
+      # Runs the promotion tasks of a KeptnAppContext (the "promote" task). Off by default.
+      promotionTasksEnabled: true
+      # The pod mutating webhook has failurePolicy: Fail. Limit it to the namespace that runs
+      # Keptn-managed workloads, so an unavailable Keptn cannot block pod creation anywhere else
+      # (flux-system, observability, kube-system, ...).
+      allowedNamespaces: [open5gs]
+      image:
+        repository: keptn/lifecycle-operator
+        tag: v2.0.0
+        digest: sha256:866ced256a8cc9c5b11e98776f0d08104fa5491002496648f8f435a92db12782
+      env:
+        # Task runtimes. These are the chart's own versions, pinned by digest.
+        functionRunnerImage: ghcr.io/keptn/deno-runtime:v3.0.1@sha256:6dd05ce86c17b3f21ddc007c00b64a429e88e03e4f0939fc23d51b64cc10a7f4
+        pythonRunnerImage: ghcr.io/keptn/python-runtime:v1.0.8@sha256:13f4ed0aad38bf00c7a590c9fae54133c1cc147893a17560437d1f0ab0824031
+      resources:
+        requests: { cpu: 5m, memory: 64Mi }
+        limits: { cpu: 500m, memory: 128Mi }
+    metricsOperator:
+      image:
+        repository: keptn/metrics-operator
+        tag: v2.1.0
+        digest: sha256:dc48471c7cf88f7ad4d945a3e6f55539b75c1a48d427e973bdbbe2469af21cf4
+      resources:
+        requests: { cpu: 10m, memory: 64Mi }
+        limits: { cpu: 500m, memory: 128Mi }
+    certManager:
+      image:
+        repository: keptn/certificate-operator
+        tag: v3.0.0
+        digest: sha256:b82064b0e339fa7ab95e5c784c9783eb3e0ddfb7ef5ed2a003e1098bc63c78fd
+      resources:
+        requests: { cpu: 5m, memory: 16Mi }
+        limits: { cpu: 25m, memory: 64Mi }

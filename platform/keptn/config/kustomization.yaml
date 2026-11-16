@@ -1,0 +1,6 @@
+# Applied by the "platform-config" Flux Kustomization (clusters/lab/platform.yaml) after the
+# Keptn HelmRelease is ready, because the KeptnConfig CRD comes from that release.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - keptn-config.yaml

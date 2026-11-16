@@ -59,9 +59,9 @@ available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused w
 check. These figures are targets for the lab's resource requests; measured numbers will be added
 once the end-to-end runs are in place.
 
-Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Cilium is needed for
-NetworkPolicy enforcement and SCTP tests (`kind/cluster-cilium.yaml`,
-`kind/cluster-full-cilium.yaml`).
+Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Both enforce the lab's
+NetworkPolicies (kindnet does since Kind v0.24); Cilium is needed for SCTP tests
+(`kind/cluster-cilium.yaml`, `kind/cluster-full-cilium.yaml`).
 
 Optional parts are separate Flux Kustomizations listed in `clusters/lab/kustomization.yaml`.
 To drop Jaeger tracing, remove `tracing.yaml` from that list and commit; Flux prunes it.
@@ -126,8 +126,9 @@ polling, and Gateway API (never Ingress NGINX) for exposing the UIs.
 - The `open5gs` namespace enforces the `privileged` Pod Security level (UPF and UEs need
   `NET_ADMIN` and `/dev/net/tun`).
 - The traffic job uses `pods/exec` on the UE pods.
-- ValidatingAdmissionPolicies run in `Warn` and `Audit` mode.
-- Kindnet does not enforce NetworkPolicies; use `CNI=cilium`.
+- The image-pinning and Keptn-version ValidatingAdmissionPolicies run in `Warn` and `Audit` mode
+  (the Keptn task-identity and operator Secret-reference policies deny).
+- NetworkPolicies isolate ingress only; egress stays open.
 
 ## 10. Version pins
 

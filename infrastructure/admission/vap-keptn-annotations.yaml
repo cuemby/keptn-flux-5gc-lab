@@ -1,0 +1,48 @@
+# A workload that Keptn tracks (keptn.sh/workload on the pod template) must also name its app
+# and carry a real release version. This catches a post-renderer that lost an annotation, and a
+# "${RELEASE_ID}" that Flux did not substitute (Keptn would then see no new version).
+# Lab default is Warn + Audit.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: lab-keptn-version
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        resources: ["deployments", "statefulsets", "daemonsets"]
+        operations: ["CREATE", "UPDATE"]
+  matchConditions:
+    - name: keptn-workload
+      expression: >-
+        has(object.spec.template.metadata) && has(object.spec.template.metadata.annotations)
+        && 'keptn.sh/workload' in object.spec.template.metadata.annotations
+  variables:
+    - name: annotations
+      expression: object.spec.template.metadata.annotations
+  validations:
+    - expression: "'keptn.sh/app' in variables.annotations"
+      message: pod templates with keptn.sh/workload must also set keptn.sh/app
+      reason: Invalid
+    - expression: >-
+        'keptn.sh/version' in variables.annotations
+        && variables.annotations['keptn.sh/version'].matches('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')
+      messageExpression: >-
+        'keptn.sh/version must be a release id such as lab-20261116-120000 (is the RELEASE_ID'
+        + ' substitution in place?), got: '
+        + ('keptn.sh/version' in variables.annotations
+           ? '"' + variables.annotations['keptn.sh/version'] + '"' : 'nothing')
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: lab-keptn-version
+spec:
+  policyName: lab-keptn-version
+  validationActions: [Warn, Audit]
+  matchResources:
+    namespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: open5gs }

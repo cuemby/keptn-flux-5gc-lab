@@ -1,0 +1,47 @@
+# Warn (and record an audit annotation) when a pod in a lab namespace uses an image without a
+# version: no tag, ":latest", and no digest. Lab default is Warn + Audit; switch the binding to
+# Deny on a shared cluster.
+#   kubectl -n open5gs run test --image=busybox:latest   ->  Warning: ... busybox:latest
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: lab-pinned-images
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+        operations: ["CREATE"]
+  variables:
+    - name: images
+      expression: >-
+        object.spec.containers.map(c, c.image)
+        + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : [])
+        + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers.map(c, c.image) : [])
+    # Pinned: a digest, or a tag (after the last "/") other than "latest".
+    - name: unpinned
+      expression: >-
+        variables.images.filter(i, !i.contains('@sha256:')
+          && (!i.matches(':[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$') || i.endsWith(':latest')))
+  validations:
+    - expression: size(variables.unpinned) == 0
+      messageExpression: >-
+        'images must be pinned to a version tag or digest, not latest or untagged: '
+        + variables.unpinned.join(', ')
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: lab-pinned-images
+spec:
+  policyName: lab-pinned-images
+  validationActions: [Warn, Audit]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [open5gs, observability, keptn-system]

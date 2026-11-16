@@ -1,0 +1,19 @@
+# Identities with no Kubernetes API rights. Their tokens are not mounted, so a compromised
+# task or relay pod has no credentials for the cluster.
+#   keptn-task-runner: the kpi-guard, kpi-guard-py and promote KeptnTaskDefinitions. They only
+#     call Prometheus and the GitHub API (token from the github-dispatch Secret, which the
+#     lifecycle operator passes in as SECURE_DATA).
+#   alert-relay: the Alertmanager-to-GitHub relay (mission control).
+# keptn-traffic, the one task identity with API rights, is defined next to its Role in
+# traffic/traffic-pulse.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keptn-task-runner
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alert-relay
+automountServiceAccountToken: false

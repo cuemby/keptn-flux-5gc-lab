@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - vap-pinned-images.yaml
+  - vap-keptn-annotations.yaml
+  - vap-keptn-task-identity.yaml
+  - vap-operator-secret-refs.yaml
