@@ -1,0 +1,25 @@
+# flux bootstrap writes gotk-components.yaml and gotk-sync.yaml into this directory
+# and keeps this kustomization.yaml as it is, so the patch below survives re-bootstraps.
+# The two files committed here are empty placeholders until the first bootstrap.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gotk-components.yaml
+  - gotk-sync.yaml
+patches:
+  # Pod Security Admission: enforce baseline, warn and audit on restricted.
+  - target:
+      kind: Namespace
+      name: flux-system
+    patch: |
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: flux-system
+        labels:
+          pod-security.kubernetes.io/enforce: baseline
+          pod-security.kubernetes.io/enforce-version: latest
+          pod-security.kubernetes.io/warn: restricted
+          pod-security.kubernetes.io/warn-version: latest
+          pod-security.kubernetes.io/audit: restricted
+          pod-security.kubernetes.io/audit-version: latest

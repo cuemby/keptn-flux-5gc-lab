@@ -1,0 +1,15 @@
+# Same nodes as cluster.yaml, without the default CNI so Cilium can be installed
+# (scripts/bootstrap.sh does this when CNI=cilium). kube-proxy stays enabled.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: keptn-5gc
+networking:
+  disableDefaultCNI: true
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+  - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+# Fallback node images published with Kind v0.33.0:
+#   kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+#   kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0

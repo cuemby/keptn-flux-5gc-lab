@@ -1,0 +1,15 @@
+# Entry point that Flux reconciles (flux bootstrap --path=clusters/lab).
+# Reconcile order: namespaces + these Flux Kustomizations, then infrastructure,
+# observability, platform and apps (see dependsOn in each file).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - flux-system
+  - namespaces.yaml
+  - infrastructure.yaml
+  - observability.yaml
+  # Optional: Jaeger tracing. Remove this line to save memory on small laptops;
+  # Flux then prunes Jaeger (the OTel Collector keeps running without a trace backend).
+  - tracing.yaml
+  - platform.yaml
+  - apps.yaml

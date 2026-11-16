@@ -1,0 +1,11 @@
+# Local tool installs and generated CRD schemas (make tools / make schemas)
+.tools/
+
+# Lab users and credentials: never commit these
+users/
+*.kubeconfig
+*.key
+*.crt
+*.csr
+.env
+*.agekey

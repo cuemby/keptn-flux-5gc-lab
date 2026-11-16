@@ -1,0 +1,46 @@
+# OCI Helm charts, consumed by HelmReleases through chartRef.
+# Each chart is pinned by tag and by manifest digest; the digest wins if both are set.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: kube-prometheus-stack
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
+  ref:
+    tag: "93.3.0"
+    digest: sha256:12b96b769049bbac5021d1bf544476ed3b1f42df7216d8eb7a70e98007a655a1
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: open5gs
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: oci://registry-1.docker.io/gradiantcharts/open5gs
+  ref:
+    tag: "2.4.1"
+    digest: sha256:b1feba2cbfa1c53bd1324c2a1b03ef52efc5a4e85401c8053972b17f1af62301
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: ueransim-gnb
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: oci://registry-1.docker.io/gradiantcharts/ueransim-gnb
+  ref:
+    tag: "0.2.6"
+    digest: sha256:0c8d4a51f91d80227c2cc84004ea094bc35ce3663c9ce74d9f037fd8549e8029
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
