@@ -111,6 +111,10 @@ jobs:
           if [[ ${#RESTORE[@]} -gt 0 ]]; then
             git restore --source="$SHA^" --worktree -- "${RESTORE[@]}"
           fi
+          if git diff --quiet -- "$KUST" "${RESTORE[@]}"; then
+            echo "::error::Nothing to roll back: release commit ${SHA:0:12} changed no release input on $STAGE."
+            exit 1
+          fi
           RELEASE_ID=$(./scripts/bump-release.sh "$STAGE")
           git add -- "$KUST" "${RESTORE[@]}" "clusters/$STAGE/apps.yaml"
           SAFE_REASON=$(printf '%s' "$REASON" | tr -cd '[:alnum:] :._-' | cut -c1-120)
