@@ -26,7 +26,7 @@ PROFILE="${PROFILE:-light}"
 CNI="${CNI:-kindnet}"
 REPO="${REPO:-keptn-flux-5gc-lab}"
 BRANCH="${BRANCH:-main}"
-FLUX_VERSION="${FLUX_VERSION:-2.10.0}"
+FLUX_VERSION="${FLUX_VERSION:-2.10.0}"   # renovate: datasource=github-releases depName=fluxcd/flux2 extractVersion=^v(?<version>.+)$
 CLUSTER_NAME="keptn-5gc"                 # matches name: in kind/*.yaml
 CILIUM_VERSION="1.20.4"                  # renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io
 

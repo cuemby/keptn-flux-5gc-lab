@@ -22,7 +22,7 @@
       "managerFilePatterns": ["/^Makefile$/", "/^scripts/.+\\.sh$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( registryUrl=(?<registryUrl>\\S+))?( extractVersion=(?<extractVersion>\\S+))?\\n[A-Z_]+ \\?= (?<currentValue>\\S+)",
-        "[A-Z_]+=\"(?<currentValue>[^\"]+)\"\\s+# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( registryUrl=(?<registryUrl>\\S+))?"
+        "[A-Z_]+=\"(\\$\\{[A-Z_]+:-)?(?<currentValue>[^\"}]+)\\}?\"\\s+# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( registryUrl=(?<registryUrl>\\S+))?( extractVersion=(?<extractVersion>\\S+))?"
       ]
     }
   ],
