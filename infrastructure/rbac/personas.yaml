@@ -4,6 +4,9 @@
 #
 # lab-keptn-author: author Keptn objects (including SLO analyses) and read task logs. It grants
 # no write access to Deployments, HelmReleases or Secrets: the 5G core only changes through Git.
+# The Secrets, ServiceAccounts and privileges that operators would use on the author's behalf are
+# limited by lab-keptn-task-identity (task definitions) and lab-keptn-metrics-provider-secret-refs
+# (metrics providers may not reference a Secret) in infrastructure/admission.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -29,8 +32,10 @@ rules:
 ---
 # lab-observability-editor: scrape targets, alert rules and Grafana dashboards. Dashboards are
 # ConfigMaps labelled grafana_dashboard: "1"; RBAC cannot filter by label, so this covers every
-# ConfigMap in the namespace it is bound in (observability). Secrets are not included, so the
-# Alertmanager and Grafana credentials stay out of reach.
+# ConfigMap in the namespace it is bound in (observability). Secrets are not included, and
+# lab-servicemonitor-secret-refs / lab-podmonitor-secret-refs (infrastructure/admission) deny
+# scrape configs written outside Git that make Prometheus send a Secret or its own token to a
+# target, so the Alertmanager and Grafana credentials stay out of reach.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

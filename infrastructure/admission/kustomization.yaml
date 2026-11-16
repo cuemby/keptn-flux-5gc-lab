@@ -4,3 +4,4 @@ resources:
   - vap-pinned-images.yaml
   - vap-keptn-annotations.yaml
   - vap-keptn-task-identity.yaml
+  - vap-operator-secret-refs.yaml

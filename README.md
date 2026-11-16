@@ -127,7 +127,7 @@ polling, and Gateway API (never Ingress NGINX) for exposing the UIs.
   `NET_ADMIN` and `/dev/net/tun`).
 - The traffic job uses `pods/exec` on the UE pods.
 - The image-pinning and Keptn-version ValidatingAdmissionPolicies run in `Warn` and `Audit` mode
-  (the Keptn task-identity policy denies).
+  (the Keptn task-identity and operator Secret-reference policies deny).
 - NetworkPolicies isolate ingress only; egress stays open.
 
 ## 10. Version pins
