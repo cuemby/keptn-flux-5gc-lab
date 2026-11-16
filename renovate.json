@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommitsDisabled"
+  ],
+  "labels": ["dependencies"],
+  "flux": {
+    "managerFilePatterns": ["/^(clusters|infrastructure|platform|apps)/.+\\.ya?ml$/"]
+  },
+  "kubernetes": {
+    "managerFilePatterns": [
+      "/^(infrastructure|platform|apps|examples)/.+\\.ya?ml$/",
+      "/^kind/.+\\.ya?ml$/"
+    ]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Versions annotated with a '# renovate:' comment (Makefile, scripts)",
+      "managerFilePatterns": ["/^Makefile$/", "/^scripts/.+\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( registryUrl=(?<registryUrl>\\S+))?( extractVersion=(?<extractVersion>\\S+))?\\n[A-Z_]+ \\?= (?<currentValue>\\S+)",
+        "[A-Z_]+=\"(?<currentValue>[^\"]+)\"\\s+# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( registryUrl=(?<registryUrl>\\S+))?"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Kind node images are published per Kind release; take patch updates only and keep the digest",
+      "matchPackageNames": ["kindest/node"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
+    },
+    {
+      "description": "Keptn chart 0.11.0 is Keptn v2.5.0, the version this lab documents",
+      "matchPackageNames": ["keptn"],
+      "matchUpdateTypes": ["major", "minor"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Group the chart sources so they can be reviewed together",
+      "matchFileNames": ["infrastructure/sources/**"],
+      "groupName": "chart sources"
+    }
+  ]
+}
