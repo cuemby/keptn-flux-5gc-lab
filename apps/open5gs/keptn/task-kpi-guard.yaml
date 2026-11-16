@@ -34,11 +34,17 @@ spec:
         const prom = data.prometheusUrl;
 
         async function query(expr: string): Promise<number> {
-          const res = await fetch(`${prom}/api/v1/query?query=${encodeURIComponent(expr)}`,
-            { signal: AbortSignal.timeout(10_000) });
-          const body = await res.json();
-          const result = body?.data?.result ?? [];
-          return result.length ? Number(result[0].value[1]) : NaN;
+          try {
+            const res = await fetch(`${prom}/api/v1/query?query=${encodeURIComponent(expr)}`,
+              { signal: AbortSignal.timeout(10_000) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+            const body = await res.json();
+            const result = body?.data?.result ?? [];
+            return result.length ? Number(result[0].value[1]) : NaN;
+          } catch (err) {
+            console.error(`prometheus query failed (${expr}): ${err}`);
+            return NaN;
+          }
         }
 
         const REQ = "sum(increase(fivegs_amffunction_rm_reginitreq[2m]))";
@@ -93,6 +99,10 @@ spec:
             },
           );
           console.log(`rollback dispatch status ${res.status}`);
+          if (!res.ok) {
+            console.error(`kpi-guard: KPI breach, rollback dispatch FAILED (HTTP ${res.status}): ${await res.text()}`);
+            Deno.exit(1);
+          }
           console.error("kpi-guard: KPI breach, rollback requested via Git");
           Deno.exit(1);
         }
