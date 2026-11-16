@@ -55,8 +55,9 @@ action?" to "what would it take to integrate Keptn into a real delivery pipeline
 | `full` | 1 control-plane + 2 workers (`kind/cluster-full.yaml`) | all on | about 12 GB (a 16 GB machine) | 6 | 30 GB |
 
 `scripts/bootstrap.sh` refuses to create a new cluster on Linux when less memory than this is
-available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused without the check. These figures are targets for the lab's resource
-requests; measured numbers will be added once the end-to-end runs are in place.
+available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused without the
+check. These figures are targets for the lab's resource requests; measured numbers will be added
+once the end-to-end runs are in place.
 
 Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Cilium is needed for
 NetworkPolicy enforcement and SCTP tests (`kind/cluster-cilium.yaml`,
