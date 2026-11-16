@@ -1,0 +1,34 @@
+# Open5GS 5G SA core (Gradiant chart 2.4.1, Open5GS 2.8.0).
+# AMF, SMF, NSSF and UPF are Keptn workloads of the app "open5gs".
+# keptn.sh/version comes from RELEASE_ID (Flux postBuild substitution on the
+# "apps" Kustomization), so every release bump rolls these four Deployments.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata: { name: open5gs, namespace: open5gs }
+spec:
+  serviceAccountName: flux-apps
+  releaseName: open5gs                 # Deployment names are open5gs-<nf>
+  interval: 10m
+  timeout: 10m
+  chartRef: { kind: OCIRepository, name: open5gs, namespace: flux-system }
+  valuesFrom:
+    - { kind: ConfigMap, name: open5gs-values, valuesKey: values.yaml }
+  upgrade:
+    remediation: { retries: 0 }        # rollbacks are Git commits, never silent Helm rollbacks
+  postRenderers:
+    # Every pod template in chart 2.4.1 already has an annotations map
+    # (config-hash), so JSON-patch "add" on a single key is safe.
+    - kustomize:
+        patches:
+          - target: { kind: Deployment, name: "open5gs-(amf|smf|nssf|upf)" }
+            patch: |
+              - op: add
+                path: /spec/template/metadata/annotations/keptn.sh~1app
+                value: open5gs
+              - op: add
+                path: /spec/template/metadata/annotations/keptn.sh~1version
+                value: "${RELEASE_ID}"
+          - { target: { kind: Deployment, name: open5gs-amf }, patch: '[{"op":"add","path":"/spec/template/metadata/annotations/keptn.sh~1workload","value":"amf"}]' }
+          - { target: { kind: Deployment, name: open5gs-smf }, patch: '[{"op":"add","path":"/spec/template/metadata/annotations/keptn.sh~1workload","value":"smf"}]' }
+          - { target: { kind: Deployment, name: open5gs-nssf }, patch: '[{"op":"add","path":"/spec/template/metadata/annotations/keptn.sh~1workload","value":"nssf"}]' }
+          - { target: { kind: Deployment, name: open5gs-upf }, patch: '[{"op":"add","path":"/spec/template/metadata/annotations/keptn.sh~1workload","value":"upf"}]' }

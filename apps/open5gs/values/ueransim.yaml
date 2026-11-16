@@ -1,0 +1,23 @@
+# Gradiant's gnb-ues-values.yaml from the open5gs + UERANSIM tutorial,
+# plus light-profile resources. Matches the PLMN 999/70, TAC 1 and slice
+# SST 1 / SD 0x111111 served by values/open5gs-good.yaml.
+amf:
+  hostname: open5gs-amf-ngap
+
+mcc: '999'
+mnc: '70'
+sst: 1
+sd: "0x111111"
+tac: '0001'
+
+resources:
+  requests: { cpu: 25m, memory: 32Mi }
+  limits: { memory: 128Mi }
+
+ues:
+  enabled: true
+  count: 2                     # IMSIs 999700000000001-2, seeded by populate in open5gs values
+  initialMSISDN: '0000000001'
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 128Mi }

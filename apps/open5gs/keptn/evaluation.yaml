@@ -1,0 +1,10 @@
+apiVersion: lifecycle.keptn.sh/v1
+kind: KeptnEvaluationDefinition
+metadata: { name: open5gs-kpis, namespace: open5gs }
+spec:
+  objectives:
+    - { keptnMetricRef: { name: amf-reg-success-ratio, namespace: open5gs }, evaluationTarget: ">0.95" }
+    - { keptnMetricRef: { name: smf-pdu-success-ratio, namespace: open5gs }, evaluationTarget: ">0.95" }
+    - { keptnMetricRef: { name: amf-registered-subscribers, namespace: open5gs }, evaluationTarget: ">0" }
+    - { keptnMetricRef: { name: upf-sessions, namespace: open5gs }, evaluationTarget: ">0" }
+    - { keptnMetricRef: { name: upf-n3-in-pkt-rate, namespace: open5gs }, evaluationTarget: ">0" }

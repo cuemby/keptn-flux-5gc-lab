@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: open5gs
+resources:
+  - helmrelease-open5gs.yaml
+  - helmrelease-ueransim.yaml
+  - traffic/traffic-pulse.yaml
+  - keptn/metrics-provider.yaml
+  - keptn/metrics.yaml
+  - keptn/evaluation.yaml
+  - keptn/app-context.yaml
+  - keptn/task-traffic-burst.yaml
+  - keptn/task-kpi-guard.yaml
+  - keptn/task-kpi-guard-py.yaml
+  - keptn/task-promote.yaml
+  - keptn/analysis/value-templates.yaml
+  - keptn/analysis/definition.yaml
+configMapGenerator:
+  # scripts/inject-fault.sh and scripts/heal.sh swap the file on the next line.
+  - name: open5gs-values
+    files: [values.yaml=values/open5gs-good.yaml]
+  - name: ueransim-values
+    files: [values.yaml=values/ueransim.yaml]
+generatorOptions:
+  disableNameSuffixHash: true

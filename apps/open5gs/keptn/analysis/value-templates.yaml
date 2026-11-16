@@ -1,0 +1,26 @@
+# SLIs for the open5gs-slo AnalysisDefinition. {{.window}} comes from the
+# Analysis "args" (see examples/analysis-run.yaml).
+apiVersion: metrics.keptn.sh/v1
+kind: AnalysisValueTemplate
+metadata: { name: amf-reg-success, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: >-
+    sum(increase(fivegs_amffunction_rm_reginitsucc[{{.window}}]))
+    / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[{{.window}}])), 1)
+---
+apiVersion: metrics.keptn.sh/v1
+kind: AnalysisValueTemplate
+metadata: { name: smf-pdu-success, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: >-
+    sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[{{.window}}]))
+    / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[{{.window}}])), 1)
+---
+apiVersion: metrics.keptn.sh/v1
+kind: AnalysisValueTemplate
+metadata: { name: upf-n3-rate, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[{{.window}}]))"

@@ -1,0 +1,74 @@
+# Chart defaults from the chart's values-5g.yaml (5G SA, 4G NFs off),
+# the PLMN/slice/subscriber settings from Gradiant's open5gs + UERANSIM
+# tutorial, metrics for AMF/SMF/UPF, and light-profile resources.
+#
+# Light profile: every 5G NF requests 25m CPU / 48Mi and is capped at 256Mi.
+# Open5GS + MongoDB together request ~0.3 CPU / ~0.7Gi and are capped at
+# ~3.3Gi, which keeps the whole lab within about 6 GB on a 2-node Kind cluster.
+
+# 4G / EPC network functions are not used.
+hss: { enabled: false }
+mme: { enabled: false }
+pcrf: { enabled: false }
+sgwc: { enabled: false }
+sgwu: { enabled: false }
+sepp: { enabled: false }
+webui: { enabled: false }   # optional subscriber UI; populate below seeds the UEs
+
+mongodb:
+  enabled: true
+  auth: { enabled: false }
+  persistence: { enabled: true, size: 1Gi }
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 512Mi }
+
+populate:
+  enabled: true
+  # Two test subscribers matching values/ueransim.yaml (ues.count: 2).
+  # K and OPc are the public UERANSIM/Open5GS sample values, not credentials.
+  initCommands:
+    - open5gs-dbctl add_ue_with_slice 999700000000001 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA internet 1 111111
+    - open5gs-dbctl add_ue_with_slice 999700000000002 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA internet 1 111111
+  mongodbWait:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+
+amf:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
+  resources: &nf
+    requests: { cpu: 25m, memory: 48Mi }
+    limits: { memory: 256Mi }
+  config:
+    guamiList:
+      - plmn_id: { mcc: "999", mnc: "70" }
+        amf_id: { region: 2, set: 1 }
+    taiList:
+      - plmn_id: { mcc: "999", mnc: "70" }
+        tac: [1]
+    plmnList:
+      - plmn_id: { mcc: "999", mnc: "70" }
+        s_nssai:
+          - { sst: 1, sd: "0x111111" }
+smf:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
+  resources: *nf
+  config:
+    pcrf: { enabled: false }
+upf:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
+  resources: *nf
+  # Chart default UE pool: 10.45.0.0/16 on ogstun, gateway 10.45.0.1 (DNN internet).
+nssf:
+  resources: *nf
+  config:
+    nsiList:
+      - { uri: "", sst: 1, sd: "0x111111" }
+ausf: { resources: *nf }
+bsf: { resources: *nf }
+nrf: { resources: *nf }
+pcf: { resources: *nf, mongodb: { enabled: false } }
+scp: { resources: *nf, mongodb: { enabled: false } }
+udm: { resources: *nf }
+udr: { resources: *nf }

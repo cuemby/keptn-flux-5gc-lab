@@ -1,0 +1,74 @@
+# Baseline traffic: every 2 minutes, restart the UE Deployment (fresh
+# registrations and PDU sessions), then ping the UPF gateway through each UE
+# tunnel (N3 user-plane packets). keptn/task-traffic-burst.yaml runs the same
+# script inside the Keptn post-deployment phase.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: keptn-traffic }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: keptn-traffic }
+rules:
+  # "list" + "watch" with resourceNames are authorized when the request uses a
+  # metadata.name field selector, which is what "kubectl rollout status" does.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["ueransim-gnb-ues"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: keptn-traffic }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: keptn-traffic }
+subjects: [{ kind: ServiceAccount, name: keptn-traffic }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: traffic-pulse
+  annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
+spec:
+  schedule: "*/2 * * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 600
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: keptn-traffic
+          restartPolicy: Never
+          securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: traffic
+              image: alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0   # kubectl + sh; image default user is root, overridden above
+              env:
+                - { name: HOME, value: /tmp }                                        # kubectl cache; root fs is read-only
+                - { name: UE_DEPLOYMENT, value: "ueransim-gnb-ues" }
+                - { name: UE_SELECTOR, value: "app.kubernetes.io/component=ues" }
+                - { name: UE_TUN, value: "uesimtun0" }                              # first UE's PDU session
+                - { name: UPF_GW, value: "10.45.0.1" }                              # Open5GS default ogstun gateway
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  kubectl rollout restart "deployment/$UE_DEPLOYMENT"
+                  kubectl rollout status "deployment/$UE_DEPLOYMENT" --timeout=120s
+                  sleep 15
+                  for p in $(kubectl get pods -l "$UE_SELECTOR" --field-selector=status.phase=Running -o name); do
+                    kubectl exec "$p" -- ping -I "$UE_TUN" -c 20 -i 0.5 "$UPF_GW" || echo "ping failed on $p"
+                  done
+              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+              resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
+              volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          volumes: [{ name: tmp, emptyDir: { sizeLimit: 64Mi } }]
