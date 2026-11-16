@@ -1,0 +1,10 @@
+# PodMonitor and PrometheusRule objects. Their CRDs are installed by the kube-prometheus-stack
+# HelmRelease, so they cannot be applied in the same Flux Kustomization as that HelmRelease
+# (the server-side dry-run of the whole set fails until the CRDs exist). The
+# observability-monitors Flux Kustomization in ../monitors.yaml applies this directory.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+resources:
+  - flux-podmonitor.yaml
+  - alert-rules.yaml

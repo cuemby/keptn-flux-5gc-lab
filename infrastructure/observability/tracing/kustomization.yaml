@@ -1,0 +1,8 @@
+# Optional Jaeger v2 trace backend, reconciled by clusters/lab/tracing.yaml.
+# Not listed in ../kustomization.yaml: removing clusters/lab/tracing.yaml from
+# clusters/lab/kustomization.yaml switches it off and Flux prunes it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+resources:
+  - jaeger.yaml

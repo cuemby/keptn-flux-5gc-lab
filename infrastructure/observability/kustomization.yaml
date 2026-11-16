@@ -1,0 +1,11 @@
+# Applied by the observability Flux Kustomization (clusters/lab/observability.yaml).
+# No namespace transformer here: the Flux Kustomization in monitors.yaml lives in flux-system,
+# everything else declares namespace: observability itself.
+# The optional Jaeger part is in ./tracing, reconciled by clusters/lab/tracing.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - kube-prometheus-stack.yaml
+  - otel-collector.yaml
+  - monitors.yaml
+  - dashboards

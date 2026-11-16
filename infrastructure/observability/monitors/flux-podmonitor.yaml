@@ -1,0 +1,19 @@
+# Scrape the Flux controllers' own metrics (reconcile durations, controller-runtime, Go runtime)
+# on their http-prom port (8080). The state of Flux objects (gotk_resource_info) comes from
+# kube-state-metrics instead; see kube-prometheus-stack.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flux-system
+  labels:
+    app.kubernetes.io/part-of: flux
+    app.kubernetes.io/component: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [flux-system]
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: flux
+  podMetricsEndpoints:
+    - port: http-prom
+      interval: 30s

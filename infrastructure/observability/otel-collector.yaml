@@ -1,0 +1,91 @@
+# OpenTelemetry Collector (contrib image) between Keptn and the trace and metric backends:
+#   traces:  Keptn (OTLP, KeptnConfig OTelCollectorUrl) -> Jaeger (optional tracing part)
+#   metrics: Keptn lifecycle-operator metrics, scraped here and re-exported on :8889 with
+#            job="otel-collector", which is what Keptn's Grafana dashboards query.
+# The observability Kustomization has no postBuild, so the ${env:...} strings are left for
+# the collector to expand.
+# Expected footprint: about 100-200 MiB.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  interval: 30m
+  # The chart renders a ServiceMonitor, whose CRD comes with kube-prometheus-stack.
+  dependsOn:
+    - name: kube-prometheus-stack
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: "0.178.3"
+      sourceRef:
+        kind: HelmRepository
+        name: open-telemetry
+        namespace: flux-system
+  values:
+    fullnameOverride: otel-collector
+    mode: deployment
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.163.2"
+      digest: sha256:7f22d2a6748110ffb6a59bc0df448bccbf501cdb667d610ede4c61d3863d5849
+    presets:
+      kubernetesAttributes: { enabled: true }
+    resources:
+      requests: { cpu: 25m, memory: 96Mi }
+      limits: { memory: 256Mi }
+    config:
+      receivers:
+        otlp:
+          protocols:
+            grpc: { endpoint: "${env:MY_POD_IP}:4317" }
+            http: { endpoint: "${env:MY_POD_IP}:4318" }
+        # Replaces the chart's self-scrape (the ServiceMonitor below scrapes :8888 instead).
+        prometheus:
+          config:
+            scrape_configs:
+              - job_name: otel-collector
+                scrape_interval: 15s
+                static_configs:
+                  - targets: ["lifecycle-operator-metrics-service.keptn-system.svc:2222"]
+        # Not used in the lab.
+        jaeger: null
+        zipkin: null
+      processors:
+        memory_limiter: { check_interval: 5s, limit_percentage: 80, spike_limit_percentage: 25 }
+        batch: {}
+      exporters:
+        otlp_grpc/jaeger:
+          endpoint: "jaeger.observability.svc:4317"
+          tls: { insecure: true }
+        prometheus:
+          endpoint: "${env:MY_POD_IP}:8889"
+        debug: null
+      service:
+        pipelines:
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, k8s_attributes, batch]
+            exporters: [otlp_grpc/jaeger]
+          metrics:
+            receivers: [otlp, prometheus]
+            processors: [memory_limiter, k8s_attributes, batch]
+            exporters: [prometheus]
+          logs: null
+    ports:
+      jaeger-compact: { enabled: false }
+      jaeger-thrift: { enabled: false }
+      jaeger-grpc: { enabled: false }
+      zipkin: { enabled: false }
+      metrics: { enabled: true }
+      prom-exporter:
+        enabled: true
+        containerPort: 8889
+        servicePort: 8889
+        protocol: TCP
+    serviceMonitor:
+      enabled: true
+      metricsEndpoints:
+        - port: metrics          # collector's own telemetry (:8888)
+        - port: prom-exporter    # Keptn and OTLP metrics (:8889)

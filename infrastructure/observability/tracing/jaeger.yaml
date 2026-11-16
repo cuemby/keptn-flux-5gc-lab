@@ -1,0 +1,141 @@
+# Jaeger v2 all-in-one with in-memory storage: lab only, traces are lost on restart.
+# Use persistent storage (Elasticsearch, OpenSearch, Cassandra, Badger on a volume) outside the lab.
+# The image's built-in config listens on localhost only, so an explicit config is mounted.
+# Expected footprint: about 50-150 MiB with max_traces below.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger
+  labels: { app.kubernetes.io/name: jaeger }
+data:
+  config.yaml: |
+    service:
+      extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter]
+      telemetry:
+        resource:
+          attributes:
+            - name: service.name
+              value: jaeger
+        metrics:
+          level: basic
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+        logs:
+          level: info
+    extensions:
+      healthcheckv2:
+        use_v2: true
+        http:
+          endpoint: 0.0.0.0:13133
+      jaeger_query:
+        storage:
+          traces: memstore
+        http:
+          endpoint: 0.0.0.0:16686
+        grpc:
+          endpoint: 0.0.0.0:16685
+      jaeger_storage:
+        backends:
+          memstore:
+            memory:
+              max_traces: 20000
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch: {}
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: memstore
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  labels: { app.kubernetes.io/name: jaeger }
+spec:
+  replicas: 1
+  # In-memory storage: never run two copies side by side.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: jaeger }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: jaeger }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: jaeger
+          image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+          args: ["--config", "/etc/jaeger/config.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317, protocol: TCP }
+            - { name: otlp-http, containerPort: 4318, protocol: TCP }
+            - { name: query, containerPort: 16686, protocol: TCP }
+            - { name: metrics, containerPort: 8888, protocol: TCP }
+            - { name: health, containerPort: 13133, protocol: TCP }
+          readinessProbe:
+            httpGet: { path: /status, port: health }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /status, port: health }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/jaeger, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap: { name: jaeger }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  labels: { app.kubernetes.io/name: jaeger }
+spec:
+  selector: { app.kubernetes.io/name: jaeger }
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: otlp-grpc, protocol: TCP, appProtocol: grpc }
+    - { name: otlp-http, port: 4318, targetPort: otlp-http, protocol: TCP }
+    - { name: query, port: 16686, targetPort: query, protocol: TCP }
+    - { name: metrics, port: 8888, targetPort: metrics, protocol: TCP }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jaeger
+  labels: { app.kubernetes.io/name: jaeger }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: jaeger }
+  endpoints:
+    - port: metrics
+      interval: 30s

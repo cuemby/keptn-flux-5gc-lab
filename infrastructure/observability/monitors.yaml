@@ -1,0 +1,19 @@
+# Applies ./monitors (PodMonitor, PrometheusRule) once kube-prometheus-stack has installed the
+# prometheus-operator CRDs. It is part of the observability Kustomization, whose wait: true
+# health check includes this object, so observability turns Ready only after the rules exist.
+# It deliberately has no dependsOn on observability: that would deadlock with the parent's wait.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability-monitors
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 30s
+  timeout: 5m
+  path: ./infrastructure/observability/monitors
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
