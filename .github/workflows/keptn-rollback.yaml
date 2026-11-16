@@ -1,16 +1,14 @@
 # Git rollback requested by the Keptn kpi-guard task (source=keptn) or by Alertmanager through
-# alert-relay (source=alertmanager). It reverts the last release commit and bumps RELEASE_ID,
-# so Flux applies the previous configuration and Keptn evaluates it as a new app version.
+# alert-relay (source=alertmanager). It restores the release inputs (apps/open5gs/values,
+# apps/open5gs/kustomization.yaml, apps/open5gs/helmrelease-*.yaml) as they were before the last
+# release commit, bumps RELEASE_ID and pushes the result to main as a plain commit, so Flux applies
+# the previous configuration and Keptn evaluates it as a new app version. Other files the release
+# commit touched (workflows, RBAC, policies) are left as they are.
 #
 # Guards:
 # - A rollback that landed less than 15 minutes ago makes a second request a quiet no-op
 #   (Keptn and Alertmanager can both ask for the same rollback).
 # - If the last release commit is itself an older rollback, the job stops and asks for a human.
-#
-# Mode: pushes to main by default. With branch protection on main, set the repository variable
-# KEPTN_ROLLBACK_MODE=pr: the revert then goes to branch keptn-rollback/<stage> and a pull request.
-# PR mode also needs "Allow GitHub Actions to create and approve pull requests" in the repository
-# settings; pull requests opened with GITHUB_TOKEN do not trigger other workflows.
 name: keptn-rollback
 
 on:
@@ -42,20 +40,18 @@ concurrency:
 
 jobs:
   revert:
-    name: Revert last release
+    name: Roll back last release
     # Rollbacks act on main only; a dispatch on any other ref is ignored.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write        # push the revert commit (or the rollback branch)
-      pull-requests: write   # PR mode only
+      contents: write   # push the rollback commit
     env:
       STAGE: ${{ inputs.stage }}
       APP_VERSION: ${{ inputs.appVersion }}
       REASON: ${{ inputs.reason }}
       SOURCE: ${{ inputs.source }}
-      MODE: ${{ vars.KEPTN_ROLLBACK_MODE || 'push' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,55 +62,40 @@ jobs:
         run: |
           [[ "$STAGE" =~ ^[a-z0-9-]+$ ]] || { echo "::error::invalid stage"; exit 1; }
           [[ "$SOURCE" =~ ^(keptn|alertmanager)$ ]] || { echo "::error::invalid source"; exit 1; }
-          [[ "$MODE" =~ ^(push|pr)$ ]] || { echo "::error::KEPTN_ROLLBACK_MODE must be push or pr"; exit 1; }
           [[ -f "clusters/$STAGE/apps.yaml" ]] || { echo "::error::no clusters/$STAGE/apps.yaml"; exit 1; }
 
       - name: Find last release commit
         id: find
         run: |
-          SHA=$(git log -1 --format=%H -- "clusters/$STAGE/apps.yaml" apps/open5gs/values apps/open5gs/kustomization.yaml)
+          SHA=$(git log -1 --format=%H -- "clusters/$STAGE/apps.yaml" apps/open5gs/values apps/open5gs/kustomization.yaml 'apps/open5gs/helmrelease-*.yaml')
           [[ -n "$SHA" ]] || { echo "::error::no release commit in the last 50 commits"; exit 1; }
           AGE=$(( $(date +%s) - $(git log -1 --format=%ct "$SHA") ))
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           if git log -1 --format=%s "$SHA" | grep -q '\[keptn-rollback\]'; then
             if [[ "$AGE" -lt 900 ]]; then echo "recent=true" >> "$GITHUB_OUTPUT"; else echo "loop=true" >> "$GITHUB_OUTPUT"; fi
           fi
-          if [[ "$MODE" == pr ]] && git ls-remote --exit-code origin "refs/heads/keptn-rollback/$STAGE" >/dev/null; then
-            echo "pending=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Recent rollback already in flight
-        if: steps.find.outputs.recent == 'true' || steps.find.outputs.pending == 'true'
-        run: echo "::notice::A rollback for $STAGE landed less than 15 min ago or is still open; ignoring duplicate request from $SOURCE."
+        if: steps.find.outputs.recent == 'true'
+        run: echo "::notice::A rollback for $STAGE landed less than 15 min ago; ignoring duplicate request from $SOURCE."
 
-      - name: Revert and bump RELEASE_ID
-        if: steps.find.outputs.recent != 'true' && steps.find.outputs.pending != 'true' && steps.find.outputs.loop != 'true'
+      - name: Restore release inputs and bump RELEASE_ID
+        if: steps.find.outputs.recent != 'true' && steps.find.outputs.loop != 'true'
         env:
           SHA: ${{ steps.find.outputs.sha }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # A merge commit needs a mainline parent to revert against.
-          mainline=()
-          [[ $(git rev-list --parents -n 1 "$SHA" | wc -w) -gt 2 ]] && mainline=(-m 1)
-          git revert --no-edit --no-commit "${mainline[@]}" "$SHA"
+          git restore --source="$SHA^" --staged --worktree -- \
+            apps/open5gs/values apps/open5gs/kustomization.yaml 'apps/open5gs/helmrelease-*.yaml'
           RELEASE_ID=$(./scripts/bump-release.sh "$STAGE")
           git add "clusters/$STAGE/apps.yaml"
           SAFE_REASON=$(printf '%s' "$REASON" | tr -cd '[:alnum:] :._-' | cut -c1-120)
           SAFE_VERSION=$(printf '%s' "$APP_VERSION" | tr -cd '[:alnum:]._-' | cut -c1-64)
-          git commit -m "[keptn-rollback] revert ${SHA:0:12} on $STAGE ($SOURCE): $SAFE_REASON" \
+          git commit -m "[keptn-rollback] restore release inputs before ${SHA:0:12} on $STAGE ($SOURCE): $SAFE_REASON" \
             -m "Failed app version: ${SAFE_VERSION:-unknown}. New RELEASE_ID: $RELEASE_ID."
-          if [[ "$MODE" == push ]]; then
-            git push origin HEAD:main
-          else
-            BRANCH="keptn-rollback/$STAGE"
-            git push origin "HEAD:refs/heads/$BRANCH"
-            gh pr create --base main --head "$BRANCH" \
-              --title "$(git log -1 --format=%s)" \
-              --body "Rollback requested by $SOURCE. Merge to let Flux apply the previous configuration."
-          fi
-          echo "Reverted \`${SHA:0:12}\` on \`$STAGE\` ($SOURCE, $MODE mode); RELEASE_ID \`$RELEASE_ID\`." >> "$GITHUB_STEP_SUMMARY"
+          git push origin HEAD:main
+          echo "Restored release inputs from before \`${SHA:0:12}\` on \`$STAGE\` ($SOURCE); RELEASE_ID \`$RELEASE_ID\`." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Needs a human
         if: steps.find.outputs.loop == 'true'
