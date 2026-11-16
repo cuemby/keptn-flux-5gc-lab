@@ -1,0 +1,60 @@
+# Lab alert rules. Open5GS metric names follow 3GPP TS 28.552 (fivegs_*) as exported by the
+# Open5GS AMF, SMF and UPF metrics endpoints.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: lab-alerts
+spec:
+  groups:
+    - name: open5gs
+      rules:
+        - alert: AMFRegistrationSuccessLow
+          expr: |
+            (sum(increase(fivegs_amffunction_rm_reginitsucc[5m]))
+              / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[5m])), 1)) < 0.95
+            and sum(increase(fivegs_amffunction_rm_reginitreq[5m])) > 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "AMF initial registration success below 95% over 5m"
+        - alert: SMFPduSessionSuccessLow
+          expr: |
+            (sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m]))
+              / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])), 1)) < 0.95
+            and sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])) > 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "SMF PDU session creation success below 95% over 5m"
+        - alert: UPFNoUserPlaneTraffic
+          expr: sum(fivegs_upffunction_upf_sessionnbr) > 0 and sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[5m])) == 0
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "UPF has PDU sessions but no N3 user-plane packets for 10m"
+    - name: mission-control
+      rules:
+        # Fires only after the Keptn soak window has passed (for: 15m > 5m soak), that is,
+        # degradation that appears while the release is in operation. Alertmanager routes
+        # action="rollback" to alert-relay, which requests the same Git rollback as Keptn.
+        - alert: Open5GSDegradedAfterRelease
+          expr: |
+            (sum(increase(fivegs_amffunction_rm_reginitsucc[10m]))
+              / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[10m])), 1)) < 0.90
+            and sum(increase(fivegs_amffunction_rm_reginitreq[10m])) > 0
+          for: 15m
+          labels: { severity: critical, action: rollback }
+          annotations:
+            summary: "Registration success below 90% for 15m after release; requesting Git rollback"
+    - name: gitops
+      rules:
+        # gotk_resource_info is produced by kube-state-metrics (Flux custom resource state).
+        - alert: FluxReconciliationFailing
+          expr: |
+            max by (customresource_kind, exported_namespace, name) (
+              gotk_resource_info{ready="False", suspended!="true"}
+            ) == 1
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Flux {{ $labels.customresource_kind }} {{ $labels.exported_namespace }}/{{ $labels.name }} not Ready for 10m"

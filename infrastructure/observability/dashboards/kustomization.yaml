@@ -1,0 +1,33 @@
+# Grafana dashboards as ConfigMaps labelled grafana_dashboard: "1"; the Grafana sidecar in
+# kube-prometheus-stack loads them from any namespace.
+#   open5gs-kpis.json         AMF, SMF and UPF KPIs (this lab)
+#   flux-cluster.json         Flux object state (gotk_resource_info), and
+#   flux-control-plane.json   Flux controllers; both from github.com/fluxcd/flux2-monitoring-example
+#                             at 7ab65dc8b90f7a6751d88f18bbb4e1bee33bf334 (Apache-2.0)
+#   keptn-*.json              Keptn dashboards from github.com/keptn/lifecycle-toolkit
+#                             dashboards/grafana at keptn-v2.5.0 (Apache-2.0), with their
+#                             Prometheus and Jaeger datasource UIDs mapped to this lab's
+#                             ("prometheus", "jaeger")
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    # Dashboards contain ${...} Grafana variables; never let Flux substitute them.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+configMapGenerator:
+  - name: dashboard-open5gs-kpis
+    files: [open5gs-kpis.json]
+  - name: dashboard-flux-cluster
+    files: [flux-cluster.json]
+  - name: dashboard-flux-control-plane
+    files: [flux-control-plane.json]
+  - name: dashboard-keptn-overview
+    files: [keptn-overview.json]
+  - name: dashboard-keptn-applications
+    files: [keptn-applications.json]
+  - name: dashboard-keptn-workloads
+    files: [keptn-workloads.json]

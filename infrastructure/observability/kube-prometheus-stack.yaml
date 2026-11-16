@@ -1,0 +1,274 @@
+# Prometheus, Alertmanager, Grafana, kube-state-metrics and node-exporter.
+# Chart: infrastructure/sources/oci.yaml (kube-prometheus-stack 93.3.0, pinned by digest).
+# Sized for the light profile (laptop, about 6 GB for the whole lab). Expected footprint of
+# this release at steady state: about 1-1.3 GiB (Prometheus 0.5-0.8 GiB, Grafana about 0.2 GiB,
+# the rest under 0.1 GiB each). Raise retention and limits for longer-lived clusters.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: observability
+spec:
+  interval: 30m
+  timeout: 10m
+  chartRef:
+    kind: OCIRepository
+    name: kube-prometheus-stack
+    namespace: flux-system
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Kind runs etcd, the controller manager, the scheduler and kube-proxy bound to localhost,
+    # so their scrapes and rules would only produce "target down" noise in the lab.
+    kubeEtcd: { enabled: false }
+    kubeControllerManager: { enabled: false }
+    kubeScheduler: { enabled: false }
+    kubeProxy: { enabled: false }
+    defaultRules:
+      rules:
+        etcd: false
+        kubeControllerManager: false
+        kubeSchedulerAlerting: false
+        kubeSchedulerRecording: false
+        kubeProxy: false
+        windows: false
+
+    prometheusOperator:
+      resources:
+        requests: { cpu: 20m, memory: 64Mi }
+        limits: { memory: 256Mi }
+      prometheusConfigReloader:
+        resources:
+          requests: { cpu: 10m, memory: 16Mi }
+          limits: { memory: 64Mi }
+
+    prometheus:
+      prometheusSpec:
+        # Pick up ServiceMonitors, PodMonitors and PrometheusRules from every namespace,
+        # not only the ones labelled for this Helm release.
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+        scrapeConfigSelectorNilUsesHelmValues: false
+        scrapeInterval: 15s
+        evaluationInterval: 15s
+        # Lab data only: one day on an emptyDir, capped in size. Use a storageSpec
+        # (PersistentVolumeClaim) and a longer retention outside the lab.
+        retention: 1d
+        retentionSize: 1GB
+        enableFeatures: ["exemplar-storage"]
+        resources:
+          requests: { cpu: 100m, memory: 384Mi }
+          limits: { memory: 1Gi }
+
+    alertmanager:
+      enabled: true
+      alertmanagerSpec:
+        resources:
+          requests: { cpu: 10m, memory: 32Mi }
+          limits: { memory: 128Mi }
+      # Helm merges this map into the chart default: global, inhibit_rules and templates are
+      # kept, the route keys below replace the default ones, and the routes and receivers
+      # lists replace the default lists (so "null" is declared again here).
+      config:
+        route:
+          receiver: "null"
+          group_by: [alertname]
+          routes:
+            # Mission control: Open5GSDegradedAfterRelease carries action="rollback".
+            - receiver: keptn-rollback
+              matchers: ['action="rollback"']
+              group_wait: 30s
+              repeat_interval: 1h
+        receivers:
+          - name: "null"
+          - name: keptn-rollback
+            webhook_configs:
+              - url: http://alert-relay.open5gs.svc:8080/alert
+                send_resolved: false
+
+    grafana:
+      # Secret created by scripts/bootstrap.sh; never stored in Git.
+      admin:
+        existingSecret: grafana-admin
+        userKey: admin-user
+        passwordKey: admin-password
+      resources:
+        requests: { cpu: 50m, memory: 128Mi }
+        limits: { memory: 384Mi }
+      sidecar:
+        resources:
+          requests: { cpu: 10m, memory: 48Mi }
+          limits: { memory: 128Mi }
+        # Dashboards are ConfigMaps labelled grafana_dashboard: "1" in any namespace
+        # (infrastructure/observability/dashboards/).
+        dashboards:
+          enabled: true
+          label: grafana_dashboard
+          labelValue: "1"
+          searchNamespace: ALL
+      additionalDataSources:
+        # Served by the optional tracing part (infrastructure/observability/tracing/).
+        - name: Jaeger
+          uid: jaeger
+          type: jaeger
+          access: proxy
+          url: http://jaeger.observability.svc:16686
+
+    kube-state-metrics:
+      resources:
+        requests: { cpu: 10m, memory: 48Mi }
+        limits: { memory: 192Mi }
+      # Flux controllers no longer export the state of Flux objects (gotk_reconcile_condition
+      # is gone); kube-state-metrics derives gotk_resource_info from the objects instead.
+      # Based on github.com/fluxcd/flux2-monitoring-example (Apache-2.0), limited to the kinds
+      # this lab uses.
+      rbac:
+        extraRules:
+          - apiGroups:
+              - source.toolkit.fluxcd.io
+              - kustomize.toolkit.fluxcd.io
+              - helm.toolkit.fluxcd.io
+            resources:
+              - gitrepositories
+              - helmrepositories
+              - helmcharts
+              - ocirepositories
+              - kustomizations
+              - helmreleases
+            verbs: ["list", "watch"]
+      customResourceState:
+        enabled: true
+        config:
+          spec:
+            resources:
+              - groupVersionKind:
+                  group: kustomize.toolkit.fluxcd.io
+                  version: v1
+                  kind: Kustomization
+                metricNamePrefix: gotk
+                metrics:
+                  - name: "resource_info"
+                    help: "The current state of a Flux Kustomization resource."
+                    each:
+                      type: Info
+                      info:
+                        labelsFromPath:
+                          name: [metadata, name]
+                    labelsFromPath:
+                      exported_namespace: [metadata, namespace]
+                      ready: [status, conditions, "[type=Ready]", status]
+                      suspended: [spec, suspend]
+                      revision: [status, lastAppliedRevision]
+                      source_name: [spec, sourceRef, name]
+              - groupVersionKind:
+                  group: helm.toolkit.fluxcd.io
+                  version: v2
+                  kind: HelmRelease
+                metricNamePrefix: gotk
+                metrics:
+                  - name: "resource_info"
+                    help: "The current state of a Flux HelmRelease resource."
+                    each:
+                      type: Info
+                      info:
+                        labelsFromPath:
+                          name: [metadata, name]
+                    labelsFromPath:
+                      exported_namespace: [metadata, namespace]
+                      ready: [status, conditions, "[type=Ready]", status]
+                      suspended: [spec, suspend]
+                      revision: [status, history, "0", chartVersion]
+                      chart_name: [status, history, "0", chartName]
+                      chart_app_version: [status, history, "0", appVersion]
+                      chart_ref_name: [spec, chartRef, name]
+                      chart_source_name: [spec, chart, spec, sourceRef, name]
+              - groupVersionKind:
+                  group: source.toolkit.fluxcd.io
+                  version: v1
+                  kind: GitRepository
+                metricNamePrefix: gotk
+                metrics:
+                  - name: "resource_info"
+                    help: "The current state of a Flux GitRepository resource."
+                    each:
+                      type: Info
+                      info:
+                        labelsFromPath:
+                          name: [metadata, name]
+                    labelsFromPath:
+                      exported_namespace: [metadata, namespace]
+                      ready: [status, conditions, "[type=Ready]", status]
+                      suspended: [spec, suspend]
+                      revision: [status, artifact, revision]
+                      url: [spec, url]
+              - groupVersionKind:
+                  group: source.toolkit.fluxcd.io
+                  version: v1
+                  kind: HelmRepository
+                metricNamePrefix: gotk
+                metrics:
+                  - name: "resource_info"
+                    help: "The current state of a Flux HelmRepository resource."
+                    each:
+                      type: Info
+                      info:
+                        labelsFromPath:
+                          name: [metadata, name]
+                    labelsFromPath:
+                      exported_namespace: [metadata, namespace]
+                      ready: [status, conditions, "[type=Ready]", status]
+                      suspended: [spec, suspend]
+                      revision: [status, artifact, revision]
+                      url: [spec, url]
+              - groupVersionKind:
+                  group: source.toolkit.fluxcd.io
+                  version: v1
+                  kind: HelmChart
+                metricNamePrefix: gotk
+                metrics:
+                  - name: "resource_info"
+                    help: "The current state of a Flux HelmChart resource."
+                    each:
+                      type: Info
+                      info:
+                        labelsFromPath:
+                          name: [metadata, name]
+                    labelsFromPath:
+                      exported_namespace: [metadata, namespace]
+                      ready: [status, conditions, "[type=Ready]", status]
+                      suspended: [spec, suspend]
+                      revision: [status, artifact, revision]
+                      chart_name: [spec, chart]
+                      chart_version: [spec, version]
+              - groupVersionKind:
+                  group: source.toolkit.fluxcd.io
+                  version: v1
+                  kind: OCIRepository
+                metricNamePrefix: gotk
+                metrics:
+                  - name: "resource_info"
+                    help: "The current state of a Flux OCIRepository resource."
+                    each:
+                      type: Info
+                      info:
+                        labelsFromPath:
+                          name: [metadata, name]
+                    labelsFromPath:
+                      exported_namespace: [metadata, namespace]
+                      ready: [status, conditions, "[type=Ready]", status]
+                      suspended: [spec, suspend]
+                      revision: [status, artifact, revision]
+                      url: [spec, url]
+
+    prometheus-node-exporter:
+      # The root filesystem mount fails on Kind nodes under Docker Desktop and rootless
+      # Docker/Podman (mount propagation); the lab does not need host filesystem metrics.
+      hostRootFsMount:
+        enabled: false
+      resources:
+        requests: { cpu: 10m, memory: 24Mi }
+        limits: { memory: 64Mi }
