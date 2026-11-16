@@ -161,8 +161,9 @@ make lint       # actionlint, SHA-pinned actions, gitleaks
 `make validate` builds JSON schemas from the CRDs of the pinned Flux, Keptn and
 kube-prometheus-stack versions, so misspelled fields in custom resources fail too. The
 `validate` workflow runs the same targets on every pull request, plus a check that changes to
-the Open5GS release inputs (`apps/open5gs/` and the `open5gs` and `ueransim-gnb` chart sources in
-`infrastructure/sources/oci.yaml`) come with a `RELEASE_ID` bump.
+the Open5GS release inputs (`apps/open5gs/values/`, `apps/open5gs/helmrelease-*.yaml`,
+`apps/open5gs/kustomization.yaml` and the `open5gs` and `ueransim-gnb` chart sources in
+`infrastructure/sources/oci.yaml`) come with a `RELEASE_ID` bump in `clusters/lab/apps.yaml`.
 
 ## 12. References
 
