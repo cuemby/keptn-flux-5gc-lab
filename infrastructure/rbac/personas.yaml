@@ -6,7 +6,8 @@
 # no write access to Deployments, HelmReleases or Secrets: the 5G core only changes through Git.
 # The Secrets, ServiceAccounts and privileges that operators would use on the author's behalf are
 # limited by lab-keptn-task-identity (task definitions) and lab-keptn-metrics-provider-secret-refs
-# (metrics providers may not reference a Secret) in infrastructure/admission.
+# (metrics providers may not reference a Secret) in infrastructure/admission. 5GC operators are
+# exempt from both, as they are already admin in open5gs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -35,7 +36,8 @@ rules:
 # ConfigMap in the namespace it is bound in (observability). Secrets are not included, and
 # lab-servicemonitor-secret-refs / lab-podmonitor-secret-refs (infrastructure/admission) deny
 # scrape configs written outside Git that make Prometheus send a Secret or its own token to a
-# target, so the Alertmanager and Grafana credentials stay out of reach.
+# target. Only Git, platform admins and the Keptn operators are exempt from them, so the
+# Alertmanager and Grafana credentials stay out of reach of Keptn authors and 5GC operators.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
