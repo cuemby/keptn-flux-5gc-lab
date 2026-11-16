@@ -1,0 +1,12 @@
+# One-shot SLO analysis, applied by hand (not by Flux):
+#   kubectl create -f examples/analysis-run.yaml
+#   kubectl get analyses -n open5gs -w
+apiVersion: metrics.keptn.sh/v1
+kind: Analysis
+metadata:
+  generateName: open5gs-slo-
+  namespace: open5gs
+spec:
+  timeframe: { recent: 10m }
+  args: { window: "5m" }
+  analysisDefinition: { name: open5gs-slo }

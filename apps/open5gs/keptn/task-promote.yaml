@@ -1,0 +1,47 @@
+# Promotion task (Deno). Runs only when the lifecycle operator has promotion
+# tasks enabled and the app version passed every phase. It dispatches the
+# keptn-promote.yaml workflow (inputs: stage, appVersion), which is a no-op
+# until a second stage exists.
+apiVersion: lifecycle.keptn.sh/v1
+kind: KeptnTaskDefinition
+metadata:
+  name: promote
+  namespace: open5gs
+  annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
+spec:
+  timeout: 2m
+  retries: 0
+  ttlSecondsAfterFinished: 600
+  serviceAccount: { name: keptn-task-runner }
+  automountServiceAccountToken: { type: false }
+  deno:
+    parameters:
+      map:
+        promoteWorkflow: "keptn-promote.yaml"
+    secureParameters:
+      secret: github-dispatch
+    inline:
+      code: |
+        const data = JSON.parse(Deno.env.get("DATA") ?? "{}");
+        const secure = JSON.parse(Deno.env.get("SECURE_DATA") ?? "{}");
+        const ctx = JSON.parse(Deno.env.get("KEPTN_CONTEXT") ?? "{}");
+        const stage = String(ctx.metadata?.stage ?? "lab");
+
+        const res = await fetch(
+          `https://api.github.com/repos/${secure.owner}/${secure.repo}/actions/workflows/${data.promoteWorkflow}/dispatches`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${secure.token}`,
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
+            body: JSON.stringify({ ref: "main", inputs: {
+              stage,
+              appVersion: String(ctx.appVersion ?? ""),
+            } }),
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        console.log(`promote dispatch status ${res.status}`);
+        if (!res.ok) Deno.exit(1);

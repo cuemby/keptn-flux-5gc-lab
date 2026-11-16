@@ -1,0 +1,100 @@
+# Deno runtime (ghcr.io/keptn/deno-runtime, set by the Keptn lifecycle
+# operator). Soaks the release, watches registration, PDU and N3 KPIs, and
+# requests a Git rollback (GitHub workflow_dispatch) after two consecutive
+# breaches. Keptn never rolls back by itself; Flux applies the revert commit.
+apiVersion: lifecycle.keptn.sh/v1
+kind: KeptnTaskDefinition
+metadata:
+  name: kpi-guard
+  namespace: open5gs
+  annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
+spec:
+  timeout: 15m
+  retries: 0
+  ttlSecondsAfterFinished: 600
+  serviceAccount: { name: keptn-task-runner }
+  automountServiceAccountToken: { type: false }
+  deno:
+    parameters:
+      map:
+        prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
+        soakSeconds: "300"
+        pollSeconds: "30"
+        minRegSuccess: "0.95"
+        minPduSuccess: "0.95"
+        rollbackWorkflow: "keptn-rollback.yaml"
+        stage: "lab"
+    secureParameters:
+      secret: github-dispatch       # key SECURE_DATA: {"owner","repo","token"}
+    inline:
+      code: |
+        const data = JSON.parse(Deno.env.get("DATA") ?? "{}");
+        const secure = JSON.parse(Deno.env.get("SECURE_DATA") ?? "{}");
+        const ctx = JSON.parse(Deno.env.get("KEPTN_CONTEXT") ?? "{}");
+        const prom = data.prometheusUrl;
+
+        async function query(expr: string): Promise<number> {
+          const res = await fetch(`${prom}/api/v1/query?query=${encodeURIComponent(expr)}`,
+            { signal: AbortSignal.timeout(10_000) });
+          const body = await res.json();
+          const result = body?.data?.result ?? [];
+          return result.length ? Number(result[0].value[1]) : NaN;
+        }
+
+        const REQ = "sum(increase(fivegs_amffunction_rm_reginitreq[2m]))";
+        const REG = "sum(increase(fivegs_amffunction_rm_reginitsucc[2m])) / " +
+          "clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[2m])), 1)";
+        const PDU = "sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[2m])) / " +
+          "clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m])), 1)";
+        const N3 = "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[2m]))";
+
+        let breaches = 0, samples = 0;
+        const deadline = Date.now() + Number(data.soakSeconds) * 1000;
+        while (Date.now() < deadline) {
+          const req = await query(REQ);
+          if (req > 0) {
+            samples++;
+            const reg = await query(REG);
+            const pdu = await query(PDU);
+            const n3 = await query(N3);
+            console.log(JSON.stringify({ req, reg, pdu, n3 }));
+            // "!(x >= min)" also treats a missing sample (NaN) as a breach
+            const bad = !(reg >= Number(data.minRegSuccess)) || !(pdu >= Number(data.minPduSuccess)) || !(n3 > 0);
+            breaches = bad ? breaches + 1 : 0;
+            if (breaches >= 2) break;
+          } else {
+            console.log("no registration traffic in window, waiting");
+          }
+          await new Promise((r) => setTimeout(r, Number(data.pollSeconds) * 1000));
+        }
+
+        if (samples === 0) {
+          console.error("kpi-guard: no traffic during soak; check traffic-pulse");
+          Deno.exit(1);
+        }
+
+        if (breaches >= 2) {
+          const res = await fetch(
+            `https://api.github.com/repos/${secure.owner}/${secure.repo}/actions/workflows/${data.rollbackWorkflow}/dispatches`,
+            {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${secure.token}`,
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+              body: JSON.stringify({ ref: "main", inputs: {
+                stage: data.stage,
+                appVersion: String(ctx.appVersion ?? ""),
+                reason: "kpi-guard breach: registration, PDU or N3 below threshold",
+                source: "keptn",
+              } }),
+              signal: AbortSignal.timeout(10_000),
+            },
+          );
+          console.log(`rollback dispatch status ${res.status}`);
+          console.error("kpi-guard: KPI breach, rollback requested via Git");
+          Deno.exit(1);
+        }
+
+        console.log("kpi-guard: KPIs healthy for the full soak window");

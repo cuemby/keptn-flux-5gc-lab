@@ -1,0 +1,17 @@
+# UERANSIM gNB + UEs (Gradiant chart ueransim-gnb 0.2.6, UERANSIM 3.2.6).
+# Renders Deployments ueransim-gnb and ueransim-gnb-ues; UE pods carry
+# app.kubernetes.io/component=ues.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata: { name: ueransim-gnb, namespace: open5gs }
+spec:
+  serviceAccountName: flux-apps
+  releaseName: ueransim-gnb
+  dependsOn: [{ name: open5gs }]
+  interval: 10m
+  timeout: 5m
+  chartRef: { kind: OCIRepository, name: ueransim-gnb, namespace: flux-system }
+  valuesFrom:
+    - { kind: ConfigMap, name: ueransim-values, valuesKey: values.yaml }
+  upgrade:
+    remediation: { retries: 0 }

@@ -1,0 +1,6 @@
+apiVersion: metrics.keptn.sh/v1
+kind: KeptnMetricsProvider
+metadata: { name: prometheus, namespace: open5gs }
+spec:
+  type: prometheus
+  targetServer: "http://kube-prometheus-stack-prometheus.observability.svc:9090"

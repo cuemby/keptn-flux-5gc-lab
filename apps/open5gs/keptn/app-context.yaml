@@ -1,0 +1,12 @@
+apiVersion: lifecycle.keptn.sh/v1
+kind: KeptnAppContext
+metadata: { name: open5gs, namespace: open5gs }
+spec:
+  # Keptn v2.5.0 creates all tasks of a phase at once, so these run in
+  # parallel. kpi-guard waits for registration traffic, and traffic-pulse
+  # keeps traffic flowing even if the burst finishes first.
+  postDeploymentTasks: [traffic-burst, kpi-guard]   # swap kpi-guard for kpi-guard-py to use Python
+  postDeploymentEvaluations: [open5gs-kpis]
+  promotionTasks: [promote]
+  metadata:
+    stage: lab

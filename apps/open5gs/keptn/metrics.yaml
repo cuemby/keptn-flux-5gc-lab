@@ -1,0 +1,45 @@
+# Open5GS metric names (3GPP TS 28.552 style), checked against the
+# Open5GS v2.8.0 sources: src/amf/metrics.c, src/smf/metrics.c, src/upf/metrics.c.
+apiVersion: metrics.keptn.sh/v1
+kind: KeptnMetric
+metadata: { name: amf-registered-subscribers, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: "sum(fivegs_amffunction_rm_registeredsubnbr)"
+  fetchIntervalSeconds: 15
+---
+apiVersion: metrics.keptn.sh/v1
+kind: KeptnMetric
+metadata: { name: amf-reg-success-ratio, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: >-
+    sum(increase(fivegs_amffunction_rm_reginitsucc[5m]))
+    / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[5m])), 1)
+  fetchIntervalSeconds: 15
+---
+apiVersion: metrics.keptn.sh/v1
+kind: KeptnMetric
+metadata: { name: smf-pdu-success-ratio, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: >-
+    sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m]))
+    / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])), 1)
+  fetchIntervalSeconds: 15
+---
+apiVersion: metrics.keptn.sh/v1
+kind: KeptnMetric
+metadata: { name: upf-sessions, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: "sum(fivegs_upffunction_upf_sessionnbr)"
+  fetchIntervalSeconds: 15
+---
+apiVersion: metrics.keptn.sh/v1
+kind: KeptnMetric
+metadata: { name: upf-n3-in-pkt-rate, namespace: open5gs }
+spec:
+  provider: { name: prometheus }
+  query: "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[5m]))"
+  fetchIntervalSeconds: 15

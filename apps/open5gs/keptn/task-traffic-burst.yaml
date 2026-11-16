@@ -1,0 +1,40 @@
+# Container runtime. Same script as traffic/traffic-pulse.yaml, with a longer
+# ping, run as Keptn post-deployment task (hackathon Use-Case One, step 1).
+apiVersion: lifecycle.keptn.sh/v1
+kind: KeptnTaskDefinition
+metadata:
+  name: traffic-burst
+  namespace: open5gs
+  annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
+spec:
+  timeout: 5m
+  retries: 0
+  ttlSecondsAfterFinished: 600
+  serviceAccount: { name: keptn-traffic }       # defined in traffic/traffic-pulse.yaml
+  container:
+    name: traffic
+    image: alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0
+    env:
+      - { name: HOME, value: /tmp }
+      - { name: UE_DEPLOYMENT, value: "ueransim-gnb-ues" }
+      - { name: UE_SELECTOR, value: "app.kubernetes.io/component=ues" }
+      - { name: UE_TUN, value: "uesimtun0" }
+      - { name: UPF_GW, value: "10.45.0.1" }
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        set -eu
+        kubectl rollout restart "deployment/$UE_DEPLOYMENT"
+        kubectl rollout status "deployment/$UE_DEPLOYMENT" --timeout=120s
+        sleep 15
+        for p in $(kubectl get pods -l "$UE_SELECTOR" --field-selector=status.phase=Running -o name); do
+          kubectl exec "$p" -- ping -I "$UE_TUN" -c 60 -i 0.5 "$UPF_GW" || echo "ping failed on $p"
+        done
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      allowPrivilegeEscalation: false
+      capabilities: { drop: ["ALL"] }
+      seccompProfile: { type: RuntimeDefault }
+    resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }

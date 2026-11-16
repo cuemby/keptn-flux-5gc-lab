@@ -1,0 +1,25 @@
+# Weighted SLO quality gate: pass at >= 90% of the total score, warning at
+# >= 75%. Failing the key objective fails the whole analysis.
+apiVersion: metrics.keptn.sh/v1
+kind: AnalysisDefinition
+metadata: { name: open5gs-slo, namespace: open5gs }
+spec:
+  objectives:
+    - analysisValueTemplateRef: { name: amf-reg-success }
+      target:
+        failure: { lessThan: { fixedValue: "0.95" } }
+        warning: { lessThan: { fixedValue: "0.99" } }
+      weight: 2
+      keyObjective: true
+    - analysisValueTemplateRef: { name: smf-pdu-success }
+      target:
+        failure: { lessThan: { fixedValue: "0.95" } }
+        warning: { lessThan: { fixedValue: "0.99" } }
+      weight: 2
+    - analysisValueTemplateRef: { name: upf-n3-rate }
+      target:
+        failure: { lessThan: { fixedValue: "0.1" } }
+      weight: 1
+  totalScore:
+    passPercentage: 90
+    warningPercentage: 75
