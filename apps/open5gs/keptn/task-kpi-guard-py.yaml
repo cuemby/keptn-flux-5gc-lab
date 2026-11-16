@@ -23,7 +23,7 @@ spec:
         rollbackWorkflow: "keptn-rollback.yaml"
         stage: "lab"
     secureParameters:
-      secret: github-dispatch       # key SECURE_DATA: {"owner","repo","token"}
+      secret: github-dispatch       # key SECURE_DATA: {"owner","repo","token"} (+ optional "api")
     inline:
       code: |
         import json, math, os, sys, time, urllib.error, urllib.parse, urllib.request
@@ -32,6 +32,8 @@ spec:
         secure = json.loads(os.environ.get("SECURE_DATA", "{}"))
         ctx = json.loads(os.environ.get("KEPTN_CONTEXT", "{}"))
         prom = data["prometheusUrl"]
+        # GitHub API base; the e2e test points it at a mock through the Secret.
+        api = str(secure.get("api") or "https://api.github.com").rstrip("/")
 
         def query(expr):
             url = prom + "/api/v1/query?query=" + urllib.parse.quote(expr)
@@ -73,8 +75,8 @@ spec:
             raise SystemExit("kpi-guard-py: no traffic during soak; check traffic-pulse")
 
         if breaches >= 2:
-            url = ("https://api.github.com/repos/{owner}/{repo}/actions/workflows/{wf}/dispatches"
-                   .format(owner=secure["owner"], repo=secure["repo"], wf=data["rollbackWorkflow"]))
+            url = ("{api}/repos/{owner}/{repo}/actions/workflows/{wf}/dispatches"
+                   .format(api=api, owner=secure["owner"], repo=secure["repo"], wf=data["rollbackWorkflow"]))
             payload = json.dumps({"ref": "main", "inputs": {
                 "stage": data["stage"],
                 "appVersion": str(ctx.get("appVersion", "")),

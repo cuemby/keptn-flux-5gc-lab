@@ -45,6 +45,10 @@ action?" to "what would it take to integrate Keptn into a real delivery pipeline
   plane (the UPF and UEs use `/dev/net/tun`).
 - [Kind](https://kind.sigs.k8s.io/) v0.33.0 or later, kubectl v1.37, the
   [Flux CLI](https://fluxcd.io/flux/installation/) 2.x (tested pins below), Helm 3 or 4, `openssl`.
+  With [mise](https://mise.jdx.dev/), `mise install` in the repository root installs the exact
+  versions pinned in `mise.toml` (Kind 0.33.0, Flux 2.10.0, kubectl, Helm, kustomize, kubeconform,
+  yq, jq, shellcheck, actionlint, gitleaks); the e2e workflow uses the same file. Otherwise install
+  them by hand from the links above.
 - Two fine-grained GitHub tokens scoped to your fork (see [Quick start](#4-quick-start)).
 
 ### Profiles
@@ -165,6 +169,29 @@ kube-prometheus-stack versions, so misspelled fields in custom resources fail to
 the Open5GS release inputs (`apps/open5gs/values/`, `apps/open5gs/helmrelease-*.yaml`,
 `apps/open5gs/kustomization.yaml` and the `open5gs` and `ueransim-gnb` chart sources in
 `infrastructure/sources/oci.yaml`) come with a `RELEASE_ID` bump in `clusters/lab/apps.yaml`.
+
+### End-to-end test
+
+```bash
+scripts/e2e.sh all   # Kind (light profile) + Flux + scenarios 1 and 2, then deletes the cluster
+```
+
+`scripts/e2e.sh` needs no GitHub token. It copies the working tree into a scratch Git repository,
+pushes it as an OCI artifact to a local registry on the Kind network, and installs Flux with an
+`OCIRepository` named `flux-system` in place of the `GitRepository` that `flux bootstrap`
+creates. Scenario changes are made with the lab's own scripts (`bump-release.sh`,
+`inject-fault.sh`, `heal.sh` with `NO_PUSH=1`) and pushed as new artifacts. The Keptn tasks send
+their `workflow_dispatch` calls to a GitHub API mock in namespace `e2e` (the optional `api` key
+of the `github-dispatch` Secret), so a rollback or promotion is checked as *requested*; the
+`keptn-rollback` and `keptn-promote` workflows do not run. Steps can run one at a time
+(`up`, `flux`, `wait`, `baseline`, `happy`, `fault`, `heal`, `diag`, `down`); see the header of
+the script. It records host and Kind node memory every 15 s and stops (and deletes the cluster)
+when available memory falls below `E2E_MEM_FLOOR_MIB` (default 1024).
+
+The `e2e` workflow runs the same steps on every pull request on a GitHub-hosted runner and uploads
+diagnostics (`scripts/collect-diagnostics.sh`) when a step fails. Not covered there: the GitHub
+side of a rollback or promotion (needs the dispatch token), scenario 9 (alert-relay, 15 minutes
+of degradation), Cilium and SCTP (scenario 7), and the RBAC matrix (scenario 6).
 
 ## 12. References
 
