@@ -18,6 +18,9 @@ spec:
     parameters:
       map:
         prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
+        # The task starts as soon as the NFs are rolled, before the gNB and UEs are back. Wait one
+        # full KPI window (2m) so the queries only see the new release's traffic.
+        warmupSeconds: "120"
         soakSeconds: "300"
         pollSeconds: "30"
         minRegSuccess: "0.95"
@@ -56,6 +59,8 @@ spec:
           "clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m])), 1)";
         const N3 = "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[2m]))";
 
+        console.log(`warm-up: waiting ${data.warmupSeconds ?? 0}s for the new release's traffic`);
+        await new Promise((r) => setTimeout(r, Number(data.warmupSeconds ?? 0) * 1000));
         let breaches = 0, samples = 0;
         const deadline = Date.now() + Number(data.soakSeconds) * 1000;
         while (Date.now() < deadline) {

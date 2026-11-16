@@ -1,5 +1,5 @@
-# Baseline traffic: every 2 minutes, restart the UE Deployment (fresh
-# registrations and PDU sessions), then ping the UPF gateway through each UE
+# Baseline traffic: every 2 minutes, restart the gNB and then the UE Deployment
+# (fresh NG Setup, registrations and PDU sessions), then ping the UPF gateway through each UE
 # tunnel (N3 user-plane packets). keptn/task-traffic-burst.yaml runs the same
 # script inside the Keptn post-deployment phase.
 apiVersion: v1
@@ -14,7 +14,7 @@ rules:
   # metadata.name field selector, which is what "kubectl rollout status" does.
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    resourceNames: ["ueransim-gnb-ues"]
+    resourceNames: ["ueransim-gnb", "ueransim-gnb-ues"]
     verbs: ["get", "list", "watch", "patch"]
   - apiGroups: [""]
     resources: ["pods"]
@@ -55,6 +55,7 @@ spec:
               env:
                 - { name: HOME, value: /tmp }                                        # kubectl cache; root fs is read-only
                 - { name: UE_DEPLOYMENT, value: "ueransim-gnb-ues" }
+                - { name: GNB_DEPLOYMENT, value: "ueransim-gnb" }                    # restarted first: see below
                 - { name: UE_SELECTOR, value: "app.kubernetes.io/component=ues" }
                 - { name: UE_TUN, value: "uesimtun0" }                              # first UE's PDU session
                 - { name: UPF_GW, value: "10.45.0.1" }                              # Open5GS default ogstun gateway
@@ -62,6 +63,11 @@ spec:
               args:
                 - |
                   set -eu
+                  # UERANSIM 3.2.6 does not redo NG Setup when its AMF association drops (every release
+                  # rolls the AMF), so restart the gNB first, then the UEs that attach to it.
+                  kubectl rollout restart "deployment/$GNB_DEPLOYMENT"
+                  kubectl rollout status "deployment/$GNB_DEPLOYMENT" --timeout=120s
+                  sleep 5
                   kubectl rollout restart "deployment/$UE_DEPLOYMENT"
                   kubectl rollout status "deployment/$UE_DEPLOYMENT" --timeout=120s
                   sleep 15

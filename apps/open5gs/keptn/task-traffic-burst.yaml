@@ -17,6 +17,7 @@ spec:
     env:
       - { name: HOME, value: /tmp }
       - { name: UE_DEPLOYMENT, value: "ueransim-gnb-ues" }
+      - { name: GNB_DEPLOYMENT, value: "ueransim-gnb" }                    # restarted first: see below
       - { name: UE_SELECTOR, value: "app.kubernetes.io/component=ues" }
       - { name: UE_TUN, value: "uesimtun0" }
       - { name: UPF_GW, value: "10.45.0.1" }
@@ -24,6 +25,11 @@ spec:
     args:
       - |
         set -eu
+        # UERANSIM 3.2.6 does not redo NG Setup when its AMF association drops (every release
+        # rolls the AMF), so restart the gNB first, then the UEs that attach to it.
+        kubectl rollout restart "deployment/$GNB_DEPLOYMENT"
+        kubectl rollout status "deployment/$GNB_DEPLOYMENT" --timeout=120s
+        sleep 5
         kubectl rollout restart "deployment/$UE_DEPLOYMENT"
         kubectl rollout status "deployment/$UE_DEPLOYMENT" --timeout=120s
         sleep 15

@@ -345,11 +345,14 @@ step_wait() {
 # --- Keptn helpers ----------------------------------------------------------------------------
 release_id() { sed -nE 's/^[[:space:]]*RELEASE_ID:[[:space:]]*"([^"]+)".*/\1/p' "$SRC/clusters/lab/apps.yaml"; }
 
-# appversion_for <release-id>: newest KeptnAppVersion of app open5gs whose workloads all carry it.
+# appversion_for <release-id>: newest KeptnAppVersion of app open5gs in which the four tracked
+# NFs (amf, smf, nssf, upf) carry that version. The app has a fifth workload: Keptn also adopts
+# the chart's open5gs-populate pod (label app.kubernetes.io/name=open5gs, version 2.8.0).
 appversion_for() {
   kubectl -n "$NS" get keptnappversions.lifecycle.keptn.sh -o json | jq -r --arg v "$1" '
     [.items[] | select(.spec.appName == "open5gs")
-      | select((.spec.workloads // []) as $w | ($w | length) > 0 and ($w | all(.version == $v)))]
+      | select([.spec.workloads[]? | select(.version == $v) | .name] as $n
+               | ["amf", "smf", "nssf", "upf"] | all(. as $w | $n | index($w)))]
     | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty'
 }
 
@@ -377,12 +380,21 @@ wait_appversion() {
   return 1
 }
 
-# task_for <app-version> <task-definition>: newest KeptnTask of that definition for the app version.
+# task_for <app-version> <task-definition>: newest KeptnTask of that definition owned by the app version.
 task_for() {
-  local v; v="$(av_field "$1" '{.spec.version}')"
-  kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh -o json | jq -r --arg v "$v" --arg td "$2" '
-    [.items[] | select(.spec.taskDefinition == $td and .spec.context.appName == "open5gs" and .spec.context.appVersion == $v)]
+  kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh -o json | jq -r --arg av "$1" --arg td "$2" '
+    [.items[] | select(.spec.taskDefinition == $td and any(.metadata.ownerReferences[]?; .name == $av))]
     | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty'
+}
+
+wait_task() { # wait_task <task> [timeout-seconds]: wait for a KeptnTask to finish; prints its status
+  local deadline=$(( SECONDS + ${2:-1200} )) st=""
+  while (( SECONDS < deadline )); do
+    st="$(kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh "$1" -o jsonpath='{.status.status}')"
+    [[ "$st" == Succeeded || "$st" == Failed ]] && break
+    sleep 10
+  done
+  echo "$st"
 }
 
 task_logs() { # task_logs <task>: logs of the Job behind a KeptnTask
@@ -396,10 +408,9 @@ mock_dispatches() {
     jq -Rc --arg wf "$1" 'fromjson? | select(.workflow == $wf and .method == "POST")'
 }
 
-evaluations_of() { # evaluations_of <app-version>: "<name> <overallStatus>" per KeptnEvaluation
-  local v; v="$(av_field "$1" '{.spec.version}')"
-  kubectl -n "$NS" get keptnevaluations.lifecycle.keptn.sh -o json | jq -r --arg v "$v" '
-    .items[] | select(.spec.appName == "open5gs" and .spec.appVersion == $v)
+evaluations_of() { # evaluations_of <app-version>: "<name> <overallStatus>" per KeptnEvaluation it owns
+  kubectl -n "$NS" get keptnevaluations.lifecycle.keptn.sh -o json | jq -r --arg av "$1" '
+    .items[] | select(any(.metadata.ownerReferences[]?; .name == $av))
     | "\(.metadata.name) \(.status.overallStatus // "none")"'
 }
 
@@ -472,12 +483,15 @@ step_fault() {
   st="$(av_field "$av" '{.status.status}')"
   prom="$(av_field "$av" '{.status.promotionStatus}')"
   task="$(task_for "$av" kpi-guard)"
+  # The app version turns Failed as soon as any post-deployment task fails, possibly before
+  # kpi-guard has finished; wait for kpi-guard itself.
+  local tst=""
+  [[ -n "$task" ]] && tst="$(wait_task "$task")"
   logs="$( [[ -n "$task" ]] && task_logs "$task" || true)"
   printf '%s\n' "$logs" | tail -n 8 | sed 's/^/    kpi-guard: /'
 
   [[ "$st" == Failed ]] || fail "fault: app version $av status=$st (want Failed)"
-  [[ -n "$task" && "$(kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh "$task" -o jsonpath='{.status.status}')" == Failed ]] ||
-    fail "fault: kpi-guard task ${task:-missing} did not fail"
+  [[ "$tst" == Failed ]] || fail "fault: kpi-guard task ${task:-missing} ended ${tst:-unknown} (want Failed)"
   grep -q 'rollback requested via Git' <<<"$logs" || fail "fault: kpi-guard did not report 'rollback requested via Git'"
   (( $(mock_dispatches keptn-rollback.yaml | wc -l) > rb_before )) || fail "fault: the GitHub mock got no keptn-rollback.yaml dispatch"
   local d; d="$(mock_dispatches keptn-rollback.yaml | tail -n 1)"

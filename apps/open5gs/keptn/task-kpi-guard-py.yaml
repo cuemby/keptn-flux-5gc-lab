@@ -16,6 +16,9 @@ spec:
     parameters:
       map:
         prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
+        # The task starts as soon as the NFs are rolled, before the gNB and UEs are back. Wait one
+        # full KPI window (2m) so the queries only see the new release's traffic.
+        warmupSeconds: "120"
         soakSeconds: "300"
         pollSeconds: "30"
         minRegSuccess: "0.95"
@@ -53,6 +56,8 @@ spec:
                "clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m])), 1)")
         N3 = "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[2m]))"
 
+        print("warm-up: waiting {}s for the new release's traffic".format(data.get("warmupSeconds", "0")), flush=True)
+        time.sleep(int(data.get("warmupSeconds", "0")))
         breaches, samples = 0, 0
         deadline = time.time() + int(data["soakSeconds"])
         while time.time() < deadline:
