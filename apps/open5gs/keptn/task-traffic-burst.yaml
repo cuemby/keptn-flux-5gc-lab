@@ -1,5 +1,6 @@
 # Container runtime. Same script as traffic/traffic-pulse.yaml, with a longer
-# ping, run as Keptn post-deployment task (hackathon Use-Case One, step 1).
+# ping and a gNB restart first, run as Keptn post-deployment task (hackathon
+# Use-Case One, step 1).
 apiVersion: lifecycle.keptn.sh/v1
 kind: KeptnTaskDefinition
 metadata:
