@@ -1,9 +1,12 @@
 # Git rollback requested by the Keptn kpi-guard task (source=keptn) or by Alertmanager through
-# alert-relay (source=alertmanager). It restores the release inputs (apps/open5gs/values,
-# apps/open5gs/kustomization.yaml, apps/open5gs/helmrelease-*.yaml) as they were before the last
-# release commit, bumps RELEASE_ID and pushes the result to main as a plain commit, so Flux applies
-# the previous configuration and Keptn evaluates it as a new app version. Other files the release
-# commit touched (workflows, RBAC, policies) are left as they are.
+# alert-relay (source=alertmanager). From the commit before the last release commit it restores
+# only the release inputs:
+# - the configMapGenerator values selection (`files: [values.yaml=values/...]`) in
+#   apps/open5gs/kustomization.yaml; the resources: list and the rest of the file stay as they are;
+# - the values files that the restored selection references, when they exist in that commit;
+# - the apps/open5gs/helmrelease-*.yaml files that exist in that commit.
+# It never deletes files. It then bumps RELEASE_ID and pushes a plain commit to main, so Flux
+# applies the previous configuration and Keptn evaluates it as a new app version.
 #
 # Guards:
 # - A rollback that landed less than 15 minutes ago makes a second request a quiet no-op
@@ -86,10 +89,30 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git restore --source="$SHA^" --staged --worktree -- \
-            apps/open5gs/values apps/open5gs/kustomization.yaml 'apps/open5gs/helmrelease-*.yaml'
+          KUST=apps/open5gs/kustomization.yaml
+          PREV="$RUNNER_TEMP/kustomization-prev.yaml"
+          git show "$SHA^:$KUST" > "$PREV" 2>/dev/null || : > "$PREV"
+          awk 'FILENAME == ARGV[1] {
+                 if ($1 == "-" && $2 == "name:") n = $3
+                 else if ($1 == "files:" && $2 ~ /values\.yaml=values\// && n != "") sel[n] = $0
+                 next
+               }
+               $1 == "-" && $2 == "name:" { n = $3 }
+               $1 == "files:" && (n in sel) { $0 = sel[n] }
+               { print }' "$PREV" "$KUST" > "$KUST.new"
+          mv "$KUST.new" "$KUST"
+          RESTORE=()
+          while read -r f; do
+            git cat-file -e "$SHA^:apps/open5gs/$f" 2>/dev/null && RESTORE+=("apps/open5gs/$f")
+          done < <(grep -oE 'values\.yaml=values/[A-Za-z0-9._-]+' "$KUST" | cut -d= -f2)
+          while read -r f; do
+            [[ "$f" == apps/open5gs/helmrelease-*.yaml ]] && RESTORE+=("$f")
+          done < <(git ls-tree --name-only "$SHA^" apps/open5gs/)
+          if [[ ${#RESTORE[@]} -gt 0 ]]; then
+            git restore --source="$SHA^" --worktree -- "${RESTORE[@]}"
+          fi
           RELEASE_ID=$(./scripts/bump-release.sh "$STAGE")
-          git add "clusters/$STAGE/apps.yaml"
+          git add -- "$KUST" "${RESTORE[@]}" "clusters/$STAGE/apps.yaml"
           SAFE_REASON=$(printf '%s' "$REASON" | tr -cd '[:alnum:] :._-' | cut -c1-120)
           SAFE_VERSION=$(printf '%s' "$APP_VERSION" | tr -cd '[:alnum:]._-' | cut -c1-64)
           git commit -m "[keptn-rollback] restore release inputs before ${SHA:0:12} on $STAGE ($SOURCE): $SAFE_REASON" \
