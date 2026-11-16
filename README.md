@@ -54,8 +54,8 @@ action?" to "what would it take to integrate Keptn into a real delivery pipeline
 | `light` (default) | 1 control-plane + 1 worker (`kind/cluster.yaml`) | tracing on, can be turned off | about 6 GB (an 8 GB laptop with little else running) | 4 | 20 GB |
 | `full` | 1 control-plane + 2 workers (`kind/cluster-full.yaml`) | all on | about 12 GB (a 16 GB machine) | 6 | 30 GB |
 
-`scripts/bootstrap.sh` refuses to start on Linux when less memory than this is available
-(override with `SKIP_MEMORY_CHECK=1`). These figures are targets for the lab's resource
+`scripts/bootstrap.sh` refuses to create a new cluster on Linux when less memory than this is
+available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused without the check. These figures are targets for the lab's resource
 requests; measured numbers will be added once the end-to-end runs are in place.
 
 Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Cilium is needed for
@@ -88,7 +88,8 @@ To drop Jaeger tracing, remove `tracing.yaml` from that list and commit; Flux pr
 What the bootstrap does:
 
 - Creates the Kind cluster for the chosen profile (and installs Cilium when `CNI=cilium`).
-- Runs `flux bootstrap github --path=clusters/lab`. Flux writes
+- Runs `flux bootstrap github --version=v$FLUX_VERSION --path=clusters/lab` (`FLUX_VERSION`
+  defaults to 2.10.0), so the controllers match the CRD schemas `make validate` checks. Flux writes
   `clusters/lab/flux-system/gotk-components.yaml` and `gotk-sync.yaml` to your fork (the copies in
   this repository are empty placeholders) and keeps `clusters/lab/flux-system/kustomization.yaml`,
   which adds the Pod Security labels to the `flux-system` namespace.
@@ -136,7 +137,7 @@ pull requests for updates.
 |---|---|---|
 | Kind | v0.33.0 | prerequisite |
 | Kind node | `kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5` | `kind/*.yaml` |
-| Flux | CLI and CRDs v2.10.0; APIs `source/v1`, `helm/v2`, `kustomize/v1` | `Makefile`, all Flux objects |
+| Flux | CLI and CRDs v2.10.0; APIs `source/v1`, `helm/v2`, `kustomize/v1` | `Makefile`, `scripts/bootstrap.sh`, all Flux objects |
 | Keptn | chart `0.11.0` (Keptn v2.5.0) from `https://charts.lifecycle.keptn.sh` | `platform/keptn/helmrelease.yaml` |
 | kube-prometheus-stack | `oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack:93.3.0@sha256:12b96b769049bbac5021d1bf544476ed3b1f42df7216d8eb7a70e98007a655a1` | `infrastructure/sources/oci.yaml` |
 | opentelemetry-collector | chart `0.178.3` from `https://open-telemetry.github.io/opentelemetry-helm-charts` | `infrastructure/observability/otel-collector.yaml` |
@@ -159,7 +160,8 @@ make lint       # actionlint, SHA-pinned actions, gitleaks
 `make validate` builds JSON schemas from the CRDs of the pinned Flux, Keptn and
 kube-prometheus-stack versions, so misspelled fields in custom resources fail too. The
 `validate` workflow runs the same targets on every pull request, plus a check that changes to
-the Open5GS release inputs come with a `RELEASE_ID` bump.
+the Open5GS release inputs (`apps/open5gs/` and the `open5gs` and `ueransim-gnb` chart sources in
+`infrastructure/sources/oci.yaml`) come with a `RELEASE_ID` bump.
 
 ## 12. References
 

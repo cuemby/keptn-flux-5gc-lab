@@ -33,16 +33,24 @@ jobs:
       - name: actionlint, SHA-pinned actions, gitleaks
         run: make lint
 
-      # A change to the Open5GS release inputs must also bump RELEASE_ID in
+      # A change to the Open5GS release inputs (apps/open5gs/ and the open5gs and
+      # ueransim-gnb chart sources) must also bump RELEASE_ID in
       # clusters/lab/apps.yaml, otherwise Keptn sees no new app version.
       - name: RELEASE_ID bump check
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
-          if grep -qE '^apps/open5gs/(values/|helmrelease-[^/]+\.yaml$|kustomization\.yaml$)' <<<"$changed" \
-             && ! grep -qx 'clusters/lab/apps.yaml' <<<"$changed"; then
+          base=$(git merge-base "$BASE_SHA" HEAD)
+          changed=$(git diff --name-only "$base" HEAD)
+          chart_sources() {
+            git show "$1:infrastructure/sources/oci.yaml" 2>/dev/null |
+              .tools/bin/yq -o=json 'select(.kind == "OCIRepository" and (.metadata.name == "open5gs" or .metadata.name == "ueransim-gnb"))'
+          }
+          release_inputs_changed=false
+          grep -qE '^apps/open5gs/(values/|helmrelease-[^/]+\.yaml$|kustomization\.yaml$)' <<<"$changed" && release_inputs_changed=true
+          [[ "$(chart_sources "$base")" != "$(chart_sources HEAD)" ]] && release_inputs_changed=true
+          if [[ "$release_inputs_changed" == true ]] && ! grep -qx 'clusters/lab/apps.yaml' <<<"$changed"; then
             echo "::error file=clusters/lab/apps.yaml::Open5GS release inputs changed without a RELEASE_ID bump; run scripts/bump-release.sh lab"
             exit 1
           fi

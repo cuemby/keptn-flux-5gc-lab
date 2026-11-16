@@ -60,11 +60,9 @@ help: ## Show this help
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
 
 ##@ Lab
-.PHONY: up kind bootstrap ui down
+.PHONY: up bootstrap ui down
 up: ## Create the Kind cluster for PROFILE (light|full) and CNI (kindnet|cilium)
 	scripts/bootstrap.sh cluster
-
-kind: up
 
 bootstrap: ## Cluster (if missing), Flux bootstrap and runtime Secrets; needs GITHUB_USER, GITHUB_TOKEN, KEPTN_DISPATCH_TOKEN
 	scripts/bootstrap.sh

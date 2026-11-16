@@ -14,7 +14,10 @@
 #   KEPTN_DISPATCH_TOKEN   fine-grained token, Actions: write only (bootstrap only)
 #   GITHUB_OWNER           owner of the fork (default: GITHUB_USER; set it for an organization)
 #   REPO, BRANCH           fork name (default keptn-flux-5gc-lab) and branch (default main)
-#   SKIP_MEMORY_CHECK=1    do not stop when the host looks short on memory
+#   FLUX_VERSION           Flux controllers installed by bootstrap (default 2.10.0, the version
+#                          whose CRD schemas `make validate` checks)
+#   SKIP_MEMORY_CHECK=1    do not stop when a new cluster is about to be created and the host
+#                          looks short on memory
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,6 +26,7 @@ PROFILE="${PROFILE:-light}"
 CNI="${CNI:-kindnet}"
 REPO="${REPO:-keptn-flux-5gc-lab}"
 BRANCH="${BRANCH:-main}"
+FLUX_VERSION="${FLUX_VERSION:-2.10.0}"
 CLUSTER_NAME="keptn-5gc"                 # matches name: in kind/*.yaml
 CILIUM_VERSION="1.20.4"                  # renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io
 
@@ -57,19 +61,18 @@ if [[ "$MODE" == all ]]; then
 fi
 GITHUB_OWNER="${GITHUB_OWNER:-${GITHUB_USER:-}}"
 
-# Memory check (Linux only): the profile sizes assume this much memory is free for the cluster.
-if [[ -r /proc/meminfo && "${SKIP_MEMORY_CHECK:-0}" != 1 ]]; then
-  avail_mib=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
-  if (( avail_mib < need_mib )); then
-    die "PROFILE=$PROFILE wants about ${need_mib} MiB free; only ${avail_mib} MiB available. Free memory or set SKIP_MEMORY_CHECK=1."
-  fi
-fi
-
 # 1. Kind cluster
 if kind get clusters 2>/dev/null | grep -qx "$CLUSTER_NAME"; then
   log "Kind cluster $CLUSTER_NAME already exists; reusing it"
   kubectl config use-context "kind-$CLUSTER_NAME" >/dev/null
 else
+  # Memory check (Linux only): the profile sizes assume this much memory is free for the cluster.
+  if [[ -r /proc/meminfo && "${SKIP_MEMORY_CHECK:-0}" != 1 ]]; then
+    avail_mib=$(( $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) / 1024 ))
+    if (( avail_mib < need_mib )); then
+      die "PROFILE=$PROFILE wants about ${need_mib} MiB free; only ${avail_mib} MiB available. Free memory or set SKIP_MEMORY_CHECK=1."
+    fi
+  fi
   log "Creating Kind cluster $CLUSTER_NAME from $config"
   kind create cluster --config "$config"
 fi
@@ -85,9 +88,9 @@ fi
 
 # 2. Flux. bootstrap commits clusters/lab/flux-system/gotk-*.yaml to the fork and keeps
 #    clusters/lab/flux-system/kustomization.yaml (the PSA label patch) as it is.
-log "Bootstrapping Flux from $GITHUB_OWNER/$REPO ($BRANCH, clusters/lab)"
+log "Bootstrapping Flux v$FLUX_VERSION from $GITHUB_OWNER/$REPO ($BRANCH, clusters/lab)"
 flux check --pre
-bootstrap_args=(--owner="$GITHUB_OWNER" --repository="$REPO" --branch="$BRANCH" --path=clusters/lab)
+bootstrap_args=(--version="v$FLUX_VERSION" --owner="$GITHUB_OWNER" --repository="$REPO" --branch="$BRANCH" --path=clusters/lab)
 [[ "$GITHUB_OWNER" == "$GITHUB_USER" ]] && bootstrap_args+=(--personal)
 flux bootstrap github "${bootstrap_args[@]}"
 
