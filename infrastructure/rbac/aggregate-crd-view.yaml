@@ -1,0 +1,28 @@
+# Adds read access to the Keptn, Flux and prometheus-operator custom resources to the built-in
+# "view" ClusterRole (and, through Kubernetes' own aggregation chain, to "edit" and "admin").
+# Secrets are never included.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: lab-aggregate-crd-view
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+rules:
+  - apiGroups:
+      - lifecycle.keptn.sh
+      - metrics.keptn.sh
+      - options.keptn.sh
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+      - source.extensions.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - helm.toolkit.fluxcd.io
+      - notification.toolkit.fluxcd.io
+      - image.toolkit.fluxcd.io
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]

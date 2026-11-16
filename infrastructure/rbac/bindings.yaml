@@ -1,0 +1,90 @@
+# Persona bindings. Groups come from the client certificate's organisation (scripts/add-user.sh)
+# or, on other clusters, from the OIDC groups claim.
+#
+# | Group               | open5gs                         | observability                 | other namespaces |
+# |---------------------|---------------------------------|-------------------------------|------------------|
+# | lab:viewers         | view                            | view + port-forward           | view             |
+# | lab:keptn-authors   | view + lab-keptn-author         | view + editor + port-forward  | view             |
+# | lab:5gc-operators   | admin + lab-keptn-author        | view + editor + port-forward  | view             |
+# | lab:platform-admins | cluster-admin                   | cluster-admin                 | cluster-admin    |
+#
+# "view" never includes Secrets; "admin" in open5gs does (5GC operators only).
+
+# --- read access everywhere -------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: lab-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:viewers" }
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:keptn-authors" }
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:5gc-operators" }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: lab-platform-admins
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:platform-admins" }
+# --- open5gs ----------------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lab-keptn-author
+  namespace: open5gs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: lab-keptn-author
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:keptn-authors" }
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:5gc-operators" }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lab-5gc-operators-admin
+  namespace: open5gs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:5gc-operators" }
+# --- observability ----------------------------------------------------------------------------
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lab-observability-editor
+  namespace: observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: lab-observability-editor
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:keptn-authors" }
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:5gc-operators" }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lab-ui-access
+  namespace: observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: lab-ui-access
+subjects:
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:viewers" }
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:keptn-authors" }
+  - { apiGroup: rbac.authorization.k8s.io, kind: Group, name: "lab:5gc-operators" }

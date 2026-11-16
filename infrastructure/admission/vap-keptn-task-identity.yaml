@@ -1,0 +1,63 @@
+# Keptn task Jobs are created by the lifecycle operator, so Kubernetes never checks whether the
+# author of a KeptnTaskDefinition may use the ServiceAccount or Secrets the Job gets. Without
+# this policy a Keptn author (lab:keptn-authors) could run a task as keptn-traffic (pods/exec in
+# open5gs) or flux-apps (admin in open5gs), or read any Secret in open5gs through
+# secureParameters, and change the 5G core outside Git.
+#
+# For task definitions written by anyone other than Git (the flux-apps identity), 5GC operators
+# (already admin in open5gs), platform admins and the Keptn operators themselves, this policy
+# allows only the keptn-task-runner ServiceAccount (or none) and only the github-dispatch Secret.
+# It denies: unlike the other lab policies this one is a security boundary, not a hint.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: lab-keptn-task-identity
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["lifecycle.keptn.sh"]
+        apiVersions: ["*"]
+        resources: ["keptntaskdefinitions"]
+        operations: ["CREATE", "UPDATE"]
+  matchConditions:
+    - name: not-trusted-author
+      expression: >-
+        request.userInfo.username != 'system:serviceaccount:open5gs:flux-apps'
+        && !request.userInfo.username.startsWith('system:serviceaccount:keptn-system:')
+        && !request.userInfo.groups.exists(g, g in ['system:masters', 'lab:platform-admins', 'lab:5gc-operators'])
+    - name: spec-changed
+      expression: request.operation == 'CREATE' || object.spec != oldObject.spec
+  variables:
+    - name: secretRefs
+      expression: >-
+        (has(object.spec.deno) && has(object.spec.deno.secureParameters)
+          ? [object.spec.deno.secureParameters.secret] : [])
+        + (has(object.spec.python) && has(object.spec.python.secureParameters)
+          ? [object.spec.python.secureParameters.secret] : [])
+        + (has(object.spec.container) && has(object.spec.container.env)
+          ? object.spec.container.env
+              .filter(e, has(e.valueFrom) && has(e.valueFrom.secretKeyRef))
+              .map(e, e.valueFrom.secretKeyRef.name) : [])
+        + (has(object.spec.container) && has(object.spec.container.envFrom)
+          ? object.spec.container.envFrom.filter(e, has(e.secretRef)).map(e, e.secretRef.name) : [])
+  validations:
+    - expression: >-
+        !has(object.spec.serviceAccount) || object.spec.serviceAccount.name == 'keptn-task-runner'
+      messageExpression: >-
+        'task definitions outside Git may only run as ServiceAccount keptn-task-runner, not '
+        + object.spec.serviceAccount.name
+      reason: Forbidden
+    - expression: variables.secretRefs.all(s, s == 'github-dispatch')
+      messageExpression: >-
+        'task definitions outside Git may only use the github-dispatch Secret, not: '
+        + variables.secretRefs.filter(s, s != 'github-dispatch').join(', ')
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: lab-keptn-task-identity
+spec:
+  policyName: lab-keptn-task-identity
+  validationActions: [Deny]

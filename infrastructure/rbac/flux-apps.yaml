@@ -1,0 +1,59 @@
+# flux-apps: the identity Flux impersonates for the "apps" Kustomization (clusters/lab/apps.yaml)
+# and both HelmReleases in open5gs. It can change open5gs and nothing else: "admin" there, plus
+# the custom resources the apps use (admin does not cover CRDs unless they aggregate into it).
+# The Open5GS 2.4.1 and ueransim-gnb 0.2.6 charts render only namespaced objects, which this
+# covers (Deployments, StatefulSet, HPA, Services, ConfigMaps, ServiceAccounts, ServiceMonitors).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-apps
+  namespace: open5gs
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flux-apps-admin
+  namespace: open5gs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - { kind: ServiceAccount, name: flux-apps, namespace: open5gs }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: flux-apps-crds
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["lifecycle.keptn.sh"]
+    resources:
+      - keptnappcontexts
+      - keptntaskdefinitions
+      - keptnevaluationdefinitions
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["metrics.keptn.sh"]
+    resources:
+      - keptnmetrics
+      - keptnmetricsproviders
+      - analysisdefinitions
+      - analysisvaluetemplates
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors", "podmonitors", "prometheusrules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flux-apps-crds
+  namespace: open5gs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flux-apps-crds
+subjects:
+  - { kind: ServiceAccount, name: flux-apps, namespace: open5gs }

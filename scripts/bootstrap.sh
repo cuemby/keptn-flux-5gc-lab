@@ -8,7 +8,7 @@
 #
 # Environment:
 #   PROFILE=light|full     light (default): 1 control-plane + 1 worker; full: 1 + 2 workers
-#   CNI=kindnet|cilium     cilium is needed for NetworkPolicy enforcement and SCTP tests
+#   CNI=kindnet|cilium     both enforce NetworkPolicies; cilium is needed for SCTP tests
 #   GITHUB_USER            your GitHub login                       (bootstrap only)
 #   GITHUB_TOKEN           bootstrap-only fine-grained token       (bootstrap only)
 #   KEPTN_DISPATCH_TOKEN   fine-grained token, Actions: write only (bootstrap only)

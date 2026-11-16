@@ -1,0 +1,60 @@
+# Ingress isolation for the 5G core. Egress stays open (Keptn tasks and the alert relay call the
+# GitHub API; UEs ping through the UPF).
+# Enforced by kindnet (Kind v0.24 and later ship kube-network-policies) and by Cilium.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: open5gs
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# NF-to-NF signalling (SBI, NGAP over SCTP, PFCP, GTP-U), MongoDB, UERANSIM and the Keptn task
+# Jobs all run in this namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: open5gs
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Prometheus scrapes the AMF, SMF and UPF metrics endpoints (chart ServiceMonitors).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: open5gs
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: prometheus }
+---
+# Mission control: Alertmanager posts firing rollback alerts to the relay.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alertmanager-to-relay
+  namespace: open5gs
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: alert-relay }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: alertmanager }
+      ports:
+        - { port: 8080, protocol: TCP }

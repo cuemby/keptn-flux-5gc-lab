@@ -1,0 +1,16 @@
+# Defaults for containers in open5gs that set no resources, such as the Deno and Python Keptn
+# task runtimes and the chart's init containers, so one runaway pod cannot take the laptop's
+# memory (light profile: about 6 GB for the whole lab).
+# There is deliberately no CPU max: with a max, every container would have to set a CPU limit,
+# and the UERANSIM and task containers do not.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: open5gs-defaults
+  namespace: open5gs
+spec:
+  limits:
+    - type: Container
+      defaultRequest: { cpu: 10m, memory: 32Mi }
+      default: { memory: 256Mi }
+      max: { memory: 1Gi }

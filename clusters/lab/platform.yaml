@@ -16,3 +16,23 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
+---
+# The KeptnConfig needs the Keptn CRDs, which the platform HelmRelease installs, so it is
+# applied by its own Kustomization once platform is ready.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-config
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: platform
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  path: ./platform/keptn/config
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

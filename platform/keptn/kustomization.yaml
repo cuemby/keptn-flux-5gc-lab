@@ -1,0 +1,9 @@
+# Keptn (chart 0.11.0 = Keptn v2.5.0). Reconciled by the "platform" Flux Kustomization
+# (clusters/lab/platform.yaml). The KeptnConfig lives in ./config and is applied by the
+# "platform-config" Kustomization once this HelmRelease has installed the Keptn CRDs: a custom
+# resource in the same Flux Kustomization as the release that installs its CRD fails the
+# server-side dry-run, and then nothing in the Kustomization is applied.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - helmrelease.yaml

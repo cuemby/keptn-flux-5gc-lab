@@ -1,0 +1,12 @@
+# Cluster-wide Keptn options. Keptn expects a single KeptnConfig.
+# The lifecycle operator reads it at runtime; restart it after changing the collector URL:
+#   kubectl -n keptn-system rollout restart deployment/lifecycle-operator
+apiVersion: options.keptn.sh/v1alpha1
+kind: KeptnConfig
+metadata:
+  name: keptn-config
+  namespace: keptn-system
+spec:
+  # OTLP/gRPC, plain text inside the cluster (lab default; see README "Lab-only defaults").
+  # One trace per Keptn app version goes through the collector to Jaeger.
+  OTelCollectorUrl: otel-collector.observability.svc.cluster.local:4317
