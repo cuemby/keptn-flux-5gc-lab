@@ -1,0 +1,176 @@
+# keptn-flux-5gc-lab
+
+A GitOps lab for a 5G core: **Flux** reconciles everything from Git, **Keptn v2.5.0** wraps each
+5G core rollout with test traffic, KPI checks and an SLO gate, **Open5GS** is the 5G core and
+**UERANSIM** generates gNB, UE and user-plane traffic. Prometheus, Alertmanager, Grafana, the
+OpenTelemetry Collector and Jaeger v2 provide the observability. Fork it, point Flux at the fork,
+and run it on a laptop with Kind or on any conformant Kubernetes cluster.
+
+The lab is preparation material for the Sylva hackathon project "Enhancing GitOps with Keptn for
+Autonomous Operations".
+
+> This README is an initial outline. Sections marked *(to be completed)* are filled in as the
+> rest of the lab lands.
+
+## 1. What this is
+
+Every change is a Git commit, including rollbacks:
+
+```
+  git commit ──► Flux ──► Open5GS / UERANSIM ──► Keptn post-deployment tasks
+      ▲                                           (traffic-burst, kpi-guard, evaluation)
+      │                                                     │ KPIs from Prometheus
+      │                                        pass ─► promote │ fail
+      │                                                     ▼
+      └──── GitHub Actions revert commit ◄──── workflow_dispatch (keptn-rollback)
+                       ▲
+                       └──── Alertmanager (after the release window) via alert-relay
+```
+
+| Phase | Analogy | Owner in this lab |
+|---|---|---|
+| Release checks: traffic, KPIs, SLO gate, rollback request | Launch control | Keptn tasks and evaluations |
+| Watching the running system after the release window | Mission control | Prometheus rules and Alertmanager, through `alert-relay` |
+| Applying any change, including a rollback | Ground systems | Flux, from Git |
+
+## 2. Learning goals
+
+The lab is organised around nine questions, from "what triggers Keptn to execute a lifecycle
+action?" to "what would it take to integrate Keptn into a real delivery pipeline?". See
+`docs/learning-goals.md` *(to be completed)*.
+
+## 3. Prerequisites
+
+- Docker or Podman on a cgroup v2 host. A Linux host or Linux VM is needed for the full UE data
+  plane (the UPF and UEs use `/dev/net/tun`).
+- [Kind](https://kind.sigs.k8s.io/) v0.33.0 or later, kubectl v1.37, the
+  [Flux CLI](https://fluxcd.io/flux/installation/) 2.x (tested pins below), Helm 3 or 4, `openssl`.
+- Two fine-grained GitHub tokens scoped to your fork (see [Quick start](#4-quick-start)).
+
+### Profiles
+
+| Profile | Kind nodes | Optional parts | Free memory for the cluster | CPUs | Disk |
+|---|---|---|---|---|---|
+| `light` (default) | 1 control-plane + 1 worker (`kind/cluster.yaml`) | tracing on, can be turned off | about 6 GB (an 8 GB laptop with little else running) | 4 | 20 GB |
+| `full` | 1 control-plane + 2 workers (`kind/cluster-full.yaml`) | all on | about 12 GB (a 16 GB machine) | 6 | 30 GB |
+
+`scripts/bootstrap.sh` refuses to create a new cluster on Linux when less memory than this is
+available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused without the
+check. These figures are targets for the lab's resource requests; measured numbers will be added
+once the end-to-end runs are in place.
+
+Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Cilium is needed for
+NetworkPolicy enforcement and SCTP tests (`kind/cluster-cilium.yaml`,
+`kind/cluster-full-cilium.yaml`).
+
+Optional parts are separate Flux Kustomizations listed in `clusters/lab/kustomization.yaml`.
+To drop Jaeger tracing, remove `tracing.yaml` from that list and commit; Flux prunes it.
+
+## 4. Quick start
+
+1. Fork this repository.
+2. Create two fine-grained tokens limited to your fork:
+   - `GITHUB_TOKEN` for `flux bootstrap`: Administration (write) and Contents (write). Revoke it
+     after bootstrap.
+   - `KEPTN_DISPATCH_TOKEN` for Keptn tasks and the alert relay: Actions (write) only.
+3. Bootstrap:
+
+   ```bash
+   export GITHUB_USER=<your-login>        # GITHUB_OWNER=<org> if the fork lives in an organization
+   export GITHUB_TOKEN=<bootstrap token>
+   export KEPTN_DISPATCH_TOKEN=<dispatch token>
+   make bootstrap                         # PROFILE=full or CNI=cilium to change the defaults
+   flux get kustomizations -A --watch     # infrastructure -> observability -> platform -> apps
+   make ui                                # Grafana :3000, Prometheus :9090, Alertmanager :9093, Jaeger :16686
+   ```
+
+`make up` creates only the Kind cluster; `make down` deletes it.
+
+What the bootstrap does:
+
+- Creates the Kind cluster for the chosen profile (and installs Cilium when `CNI=cilium`).
+- Runs `flux bootstrap github --version=v$FLUX_VERSION --path=clusters/lab` (`FLUX_VERSION`
+  defaults to 2.10.0), so the controllers match the CRD schemas `make validate` checks. Flux writes
+  `clusters/lab/flux-system/gotk-components.yaml` and `gotk-sync.yaml` to your fork (the copies in
+  this repository are empty placeholders) and keeps `clusters/lab/flux-system/kustomization.yaml`,
+  which adds the Pod Security labels to the `flux-system` namespace.
+- Creates the runtime Secrets `open5gs/github-dispatch` and `observability/grafana-admin`
+  (random password). Nothing secret is ever committed.
+
+## 5. Scenarios
+
+Eleven scenarios, from the happy path (`make bump`) and a Keptn-driven rollback (`make fault`)
+to mission control, SLO analysis and the Python task runtime. See `docs/scenarios.md`
+*(to be completed)*.
+
+## 6. Personas and adding users
+
+`lab:viewers`, `lab:keptn-authors`, `lab:5gc-operators` and `lab:platform-admins`, with
+`scripts/add-user.sh <name> <group>` issuing 7-day client certificates. See `docs/security.md`
+*(to be completed)*.
+
+## 7. Other clusters
+
+*(to be completed)* OIDC groups instead of client certificates, a Flux `Receiver` instead of
+polling, and Gateway API (never Ingress NGINX) for exposing the UIs.
+
+## 8. Swapping the 5G core
+
+*(to be completed)* Change the Keptn post-renderer targets, the PromQL in metrics, templates and
+`kpi-guard`, and the traffic script.
+
+## 9. Lab-only defaults to change for shared clusters
+
+- OTLP is sent in plain text inside the cluster.
+- Jaeger keeps traces in memory.
+- The `open5gs` namespace enforces the `privileged` Pod Security level (UPF and UEs need
+  `NET_ADMIN` and `/dev/net/tun`).
+- The traffic job uses `pods/exec` on the UE pods.
+- ValidatingAdmissionPolicies run in `Warn` and `Audit` mode.
+- Kindnet does not enforce NetworkPolicies; use `CNI=cilium`.
+
+## 10. Version pins
+
+Every pin was checked against its registry or release page. Renovate (`renovate.json`) opens
+pull requests for updates.
+
+| Component | Pin | File |
+|---|---|---|
+| Kind | v0.33.0 | prerequisite |
+| Kind node | `kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5` | `kind/*.yaml` |
+| Flux | CLI and CRDs v2.10.0; APIs `source/v1`, `helm/v2`, `kustomize/v1` | `Makefile`, `scripts/bootstrap.sh`, all Flux objects |
+| Keptn | chart `0.11.0` (Keptn v2.5.0) from `https://charts.lifecycle.keptn.sh` | `platform/keptn/helmrelease.yaml` |
+| kube-prometheus-stack | `oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack:93.3.0@sha256:12b96b769049bbac5021d1bf544476ed3b1f42df7216d8eb7a70e98007a655a1` | `infrastructure/sources/oci.yaml` |
+| opentelemetry-collector | chart `0.178.3` from `https://open-telemetry.github.io/opentelemetry-helm-charts` | `infrastructure/observability/otel-collector.yaml` |
+| Jaeger | `cr.jaegertracing.io/jaegertracing/jaeger:2.20.0` | `infrastructure/observability/tracing/` |
+| Open5GS chart | `oci://registry-1.docker.io/gradiantcharts/open5gs:2.4.1@sha256:b1feba2cbfa1c53bd1324c2a1b03ef52efc5a4e85401c8053972b17f1af62301` | `infrastructure/sources/oci.yaml` |
+| ueransim-gnb chart | `oci://registry-1.docker.io/gradiantcharts/ueransim-gnb:0.2.6@sha256:0c8d4a51f91d80227c2cc84004ea094bc35ce3663c9ce74d9f037fd8549e8029` | `infrastructure/sources/oci.yaml` |
+| kubectl + shell (traffic) | `alpine/k8s` 1.37.x, exact tag pinned in the file | `apps/open5gs/traffic/`, `apps/open5gs/keptn/task-traffic-burst.yaml` |
+| Deno (alert-relay) | `denoland/deno` 2.x, exact tag pinned in the file | `apps/open5gs/mission-control/alert-relay.yaml` |
+| Cilium (optional) | chart `1.20.4` from `https://helm.cilium.io` | `scripts/bootstrap.sh` |
+| Validation tools | kustomize 5.8.3, kubeconform 0.8.0, yq 4.54.3, actionlint 1.7.12, gitleaks 8.30.1 | `Makefile` |
+
+## 11. Checks
+
+```bash
+make tools      # pinned tools into .tools/bin, verified against the release checksums
+make validate   # kustomize build + kubeconform -strict (Kubernetes 1.37.0 + CRD schemas) + shellcheck
+make lint       # actionlint, SHA-pinned actions, gitleaks
+```
+
+`make validate` builds JSON schemas from the CRDs of the pinned Flux, Keptn and
+kube-prometheus-stack versions, so misspelled fields in custom resources fail too. The
+`validate` workflow runs the same targets on every pull request, plus a check that changes to
+the Open5GS release inputs (`apps/open5gs/values/`, `apps/open5gs/helmrelease-*.yaml`,
+`apps/open5gs/kustomization.yaml` and the `open5gs` and `ueransim-gnb` chart sources in
+`infrastructure/sources/oci.yaml`) come with a `RELEASE_ID` bump in `clusters/lab/apps.yaml`.
+
+## 12. References
+
+See `docs/references.md` *(to be completed)*.
+
+## 13. Credits and license
+
+Built with Augie Jagau's hackathon environment and use cases, by Cuemby, for Sylva WG-06.
+
+Licensed under the Apache License 2.0; see [LICENSE](LICENSE).

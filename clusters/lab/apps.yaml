@@ -1,0 +1,24 @@
+# Open5GS, UERANSIM, traffic and the Keptn objects, applied as the flux-apps identity.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps
+  namespace: open5gs
+spec:
+  dependsOn:
+    - name: platform
+      namespace: flux-system
+  serviceAccountName: flux-apps
+  targetNamespace: open5gs
+  interval: 1m
+  path: ./apps/open5gs
+  prune: true
+  wait: false
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  postBuild:
+    substitute:
+      RELEASE_ID: "lab-20261116-000000"   # rewritten by scripts/bump-release.sh

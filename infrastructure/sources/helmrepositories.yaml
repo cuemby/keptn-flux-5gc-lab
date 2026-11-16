@@ -1,0 +1,20 @@
+# HTTP Helm repositories. Chart versions are pinned in the HelmReleases:
+#   opentelemetry-collector 0.178.3  (infrastructure/observability/otel-collector.yaml)
+#   keptn 0.11.0 = Keptn v2.5.0      (platform/keptn/helmrelease.yaml)
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: open-telemetry
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: https://open-telemetry.github.io/opentelemetry-helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: keptn
+  namespace: flux-system
+spec:
+  interval: 12h
+  url: https://charts.lifecycle.keptn.sh
