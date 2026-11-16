@@ -59,7 +59,7 @@ spec:
                 samples += 1
                 reg, pdu, n3 = query(REG), query(PDU), query(N3)
                 print(json.dumps({"req": req, "reg": reg, "pdu": pdu, "n3": n3}), flush=True)
-                # "not x >= min" also treats a missing sample (NaN) as a breach
+                # "not x >= min" also treats a missing sample or failed query (NaN) as a breach
                 bad = (not reg >= float(data["minRegSuccess"]) or not pdu >= float(data["minPduSuccess"])
                        or not n3 > 0)
                 breaches = breaches + 1 if bad else 0

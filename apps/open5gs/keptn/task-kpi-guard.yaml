@@ -64,7 +64,7 @@ spec:
             const pdu = await query(PDU);
             const n3 = await query(N3);
             console.log(JSON.stringify({ req, reg, pdu, n3 }));
-            // "!(x >= min)" also treats a missing sample (NaN) as a breach
+            // "!(x >= min)" also treats a missing sample or failed query (NaN) as a breach
             const bad = !(reg >= Number(data.minRegSuccess)) || !(pdu >= Number(data.minPduSuccess)) || !(n3 > 0);
             breaches = bad ? breaches + 1 : 0;
             if (breaches >= 2) break;
