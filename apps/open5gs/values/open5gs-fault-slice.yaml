@@ -1,5 +1,5 @@
 # Fault variant of open5gs-good.yaml, selected by scripts/inject-fault.sh.
-# Identical except for the AMF slice (see FAULT below).
+# Identical except for the NSSF slice list (see FAULT below).
 #
 # Chart defaults from the chart's values-5g.yaml (5G SA, 4G NFs off),
 # the PLMN/slice/subscriber settings from Gradiant's open5gs + UERANSIM
@@ -53,10 +53,7 @@ amf:
     plmnList:
       - plmn_id: { mcc: "999", mnc: "70" }
         s_nssai:
-          # FAULT: the AMF only serves SST 2 while the UEs request SST 1.
-          # Registration is rejected, so there are no PDU sessions and no N3
-          # traffic: AMF, SMF and UPF KPIs all drop with one change.
-          - { sst: 2, sd: "0x111111" }
+          - { sst: 1, sd: "0x111111" }
 smf:
   metrics: { enabled: true, serviceMonitor: { enabled: true } }
   resources: *nf
@@ -70,7 +67,15 @@ nssf:
   resources: *nf
   config:
     nsiList:
-      - { uri: "", sst: 1, sd: "0x111111" }
+      # FAULT: the NSSF has no network slice instance for the UEs' slice
+      # (SST 1, SD 0x111111). The AMF plmnList is unchanged, so NG Setup and
+      # UE registration still succeed (registration ratio stays high, and
+      # fivegs_amffunction_rm_reginitreq keeps rising). On each PDU Session
+      # Establishment the AMF (SCP mode, no SMF cached after the RELEASE_ID
+      # restart) asks the NSSF for the slice and gets 403 "Cannot find NSI",
+      # so it never reaches the SMF. PDU session success and N3 packet rate
+      # both drop to zero, and kpi-guard requests a rollback.
+      - { uri: "", sst: 2, sd: "0x111111" }
 ausf: { resources: *nf }
 bsf: { resources: *nf }
 nrf: { resources: *nf }

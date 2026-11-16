@@ -8,20 +8,20 @@ set -euo pipefail
 STAGE="${1:-lab}"
 cd "$(git rev-parse --show-toplevel)"
 KUST=apps/open5gs/kustomization.yaml
-FROM="values.yaml=values/open5gs-fault-plmn.yaml"
+FROM="values.yaml=values/open5gs-fault-slice.yaml"
 TO="values.yaml=values/open5gs-good.yaml"
 
 if grep -qF "$TO" "$KUST"; then
   echo "$KUST already uses values/open5gs-good.yaml; bumping RELEASE_ID only"
 else
-  grep -qF "$FROM" "$KUST" || { echo "$KUST does not reference values/open5gs-fault-plmn.yaml" >&2; exit 1; }
+  grep -qF "$FROM" "$KUST" || { echo "$KUST does not reference values/open5gs-fault-slice.yaml" >&2; exit 1; }
   sed -i.bak "s|$FROM|$TO|" "$KUST"
   rm -f "$KUST.bak"
 fi
 
 RELEASE_ID="$(scripts/bump-release.sh "$STAGE")"
 git add "$KUST" "clusters/$STAGE/apps.yaml"
-git commit -m "Restore good Open5GS config on $STAGE (RELEASE_ID $RELEASE_ID)"
+git commit -m "Restore good Open5GS config on $STAGE (RELEASE_ID $RELEASE_ID)" -- "$KUST" "clusters/$STAGE/apps.yaml"
 if [[ "${NO_PUSH:-0}" != "1" ]]; then
   git push
 fi
