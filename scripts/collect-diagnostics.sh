@@ -48,6 +48,10 @@ for ns in open5gs e2e; do
   for pod in $(kubectl -n "$ns" get pods -o name 2>/dev/null); do
     name="${pod#pod/}"
     run "logs/$ns-$name.txt" kubectl -n "$ns" logs "$pod" --all-containers --tail=1000
+    # Keptn task Jobs restart a failed container in place, which hides the first run's output.
+    if kubectl -n "$ns" get "$pod" -o jsonpath='{.status.containerStatuses[*].restartCount}' 2>/dev/null | grep -q '[1-9]'; then
+      run "logs/$ns-$name.previous.txt" kubectl -n "$ns" logs "$pod" --all-containers --previous --tail=1000
+    fi
   done
 done
 

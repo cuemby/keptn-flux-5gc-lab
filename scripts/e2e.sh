@@ -397,9 +397,15 @@ wait_task() { # wait_task <task> [timeout-seconds]: wait for a KeptnTask to fini
   echo "$st"
 }
 
-task_logs() { # task_logs <task>: logs of the Job behind a KeptnTask
-  local job; job="$(kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh "$1" -o jsonpath='{.status.jobName}')"
-  [[ -n "$job" ]] && kubectl -n "$NS" logs "job/$job" --all-containers --tail=200 2>/dev/null
+task_logs() { # task_logs <task>: logs of the pods of the Job behind a KeptnTask
+  local job pod
+  job="$(kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh "$1" -o jsonpath='{.status.jobName}')"
+  [[ -n "$job" ]] || return 0
+  for pod in $(kubectl -n "$NS" get pods -l "job-name=$job" -o name 2>/dev/null); do
+    # The Job restarts a failed container in place; the first run's output is in --previous.
+    kubectl -n "$NS" logs "$pod" --all-containers --previous --tail=200 2>/dev/null || true
+    kubectl -n "$NS" logs "$pod" --all-containers --tail=200 2>/dev/null || true
+  done
 }
 
 # mock_dispatches <workflow>: workflow_dispatch requests the GitHub mock has received, one JSON per line.

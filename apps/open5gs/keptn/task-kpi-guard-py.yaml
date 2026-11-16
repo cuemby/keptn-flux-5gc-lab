@@ -54,7 +54,8 @@ spec:
                "clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[2m])), 1)")
         PDU = ("sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[2m])) / "
                "clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m])), 1)")
-        N3 = "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[2m]))"
+        # Not the N3 packet counter: Open5GS 2.8.0 never increments it; see task-kpi-guard.yaml.
+        SESS = "sum(fivegs_upffunction_upf_sessionnbr)"
 
         print("warm-up: waiting {}s for the new release's traffic".format(data.get("warmupSeconds", "0")), flush=True)
         time.sleep(int(data.get("warmupSeconds", "0")))
@@ -64,11 +65,11 @@ spec:
             req = query(REQ)
             if req > 0:
                 samples += 1
-                reg, pdu, n3 = query(REG), query(PDU), query(N3)
-                print(json.dumps({"req": req, "reg": reg, "pdu": pdu, "n3": n3}), flush=True)
+                reg, pdu, sessions = query(REG), query(PDU), query(SESS)
+                print(json.dumps({"req": req, "reg": reg, "pdu": pdu, "sessions": sessions}), flush=True)
                 # "not x >= min" also treats a missing sample or failed query (NaN) as a breach
                 bad = (not reg >= float(data["minRegSuccess"]) or not pdu >= float(data["minPduSuccess"])
-                       or not n3 > 0)
+                       or not sessions > 0)
                 breaches = breaches + 1 if bad else 0
                 if breaches >= 2:
                     break
@@ -85,7 +86,7 @@ spec:
             payload = json.dumps({"ref": "main", "inputs": {
                 "stage": data["stage"],
                 "appVersion": str(ctx.get("appVersion", "")),
-                "reason": "kpi-guard breach: registration, PDU or N3 below threshold",
+                "reason": "kpi-guard breach: registration, PDU or UPF sessions below threshold",
                 "source": "keptn"}}).encode()
             req = urllib.request.Request(url, data=payload, method="POST", headers={
                 "Authorization": "Bearer " + secure["token"],

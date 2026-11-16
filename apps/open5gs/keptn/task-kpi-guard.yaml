@@ -1,5 +1,5 @@
 # Deno runtime (ghcr.io/keptn/deno-runtime, set by the Keptn lifecycle
-# operator). Soaks the release, watches registration, PDU and N3 KPIs, and
+# operator). Soaks the release, watches registration, PDU and UPF session KPIs, and
 # requests a Git rollback (GitHub workflow_dispatch) after two consecutive
 # breaches. Keptn never rolls back by itself; Flux applies the rollback commit.
 apiVersion: lifecycle.keptn.sh/v1
@@ -57,7 +57,9 @@ spec:
           "clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[2m])), 1)";
         const PDU = "sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[2m])) / " +
           "clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m])), 1)";
-        const N3 = "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[2m]))";
+        // Not the N3 packet counter: Open5GS 2.8.0 exports fivegs_ep_n3_gtp_indatapktn3upf but
+        // never increments it (stays 0 while UE pings pass), so active UPF sessions stand in.
+        const SESS = "sum(fivegs_upffunction_upf_sessionnbr)";
 
         console.log(`warm-up: waiting ${data.warmupSeconds ?? 0}s for the new release's traffic`);
         await new Promise((r) => setTimeout(r, Number(data.warmupSeconds ?? 0) * 1000));
@@ -69,10 +71,10 @@ spec:
             samples++;
             const reg = await query(REG);
             const pdu = await query(PDU);
-            const n3 = await query(N3);
-            console.log(JSON.stringify({ req, reg, pdu, n3 }));
+            const sessions = await query(SESS);
+            console.log(JSON.stringify({ req, reg, pdu, sessions }));
             // "!(x >= min)" also treats a missing sample or failed query (NaN) as a breach
-            const bad = !(reg >= Number(data.minRegSuccess)) || !(pdu >= Number(data.minPduSuccess)) || !(n3 > 0);
+            const bad = !(reg >= Number(data.minRegSuccess)) || !(pdu >= Number(data.minPduSuccess)) || !(sessions > 0);
             breaches = bad ? breaches + 1 : 0;
             if (breaches >= 2) break;
           } else {
@@ -99,7 +101,7 @@ spec:
               body: JSON.stringify({ ref: "main", inputs: {
                 stage: data.stage,
                 appVersion: String(ctx.appVersion ?? ""),
-                reason: "kpi-guard breach: registration, PDU or N3 below threshold",
+                reason: "kpi-guard breach: registration, PDU or UPF sessions below threshold",
                 source: "keptn",
               } }),
               signal: AbortSignal.timeout(10_000),
