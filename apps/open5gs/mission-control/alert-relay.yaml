@@ -1,7 +1,7 @@
 # Mission control: Alertmanager -> GitHub workflow_dispatch of keptn-rollback.yaml.
 # Alertmanager's webhook body is not a GitHub dispatch request, so this relay translates it.
 # It acts only on firing alerts labelled action=rollback (Open5GSDegradedAfterRelease) and
-# requests the same Git rollback that the Keptn kpi-guard task requests. Flux applies the revert.
+# requests the same Git rollback that the Keptn kpi-guard task requests. Flux applies the rollback commit.
 #
 # The github-dispatch Secret (key SECURE_DATA = {"owner","repo","token"}) is created by
 # scripts/bootstrap.sh. It is optional here: without it the relay still starts and answers

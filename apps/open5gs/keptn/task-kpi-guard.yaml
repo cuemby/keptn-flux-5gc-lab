@@ -1,7 +1,7 @@
 # Deno runtime (ghcr.io/keptn/deno-runtime, set by the Keptn lifecycle
 # operator). Soaks the release, watches registration, PDU and N3 KPIs, and
 # requests a Git rollback (GitHub workflow_dispatch) after two consecutive
-# breaches. Keptn never rolls back by itself; Flux applies the revert commit.
+# breaches. Keptn never rolls back by itself; Flux applies the rollback commit.
 apiVersion: lifecycle.keptn.sh/v1
 kind: KeptnTaskDefinition
 metadata:
