@@ -1,0 +1,76 @@
+# Promotion requested by the Keptn promote task after an app version passed every phase in a stage.
+# Promoting means bumping RELEASE_ID in the next stage's clusters/<next>/apps.yaml, so Flux rolls
+# the same configuration there and Keptn runs the lifecycle again.
+#
+# The lab has a single stage, so this is a no-op until a second stage exists: add the stage to
+# PROMOTION_ORDER and create clusters/<next>/apps.yaml (with its own RELEASE_ID).
+name: keptn-promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage the app version passed in
+        required: true
+        type: string
+      appVersion:
+        description: Keptn app version that passed
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: keptn-promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote to next stage
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # push the promotion commit
+    env:
+      STAGE: ${{ inputs.stage }}
+      APP_VERSION: ${{ inputs.appVersion }}
+      PROMOTION_ORDER: "lab staging production"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true   # zizmor: ignore[artipacked] the job pushes; nothing is uploaded
+
+      - name: Validate input
+        run: |
+          [[ "$STAGE" =~ ^[a-z0-9-]+$ ]] || { echo "::error::invalid stage"; exit 1; }
+          [[ "$APP_VERSION" =~ ^[A-Za-z0-9._-]{0,128}$ ]] || { echo "::error::invalid appVersion"; exit 1; }
+
+      - name: Find next stage
+        id: next
+        run: |
+          read -ra order <<<"$PROMOTION_ORDER"
+          NEXT=""
+          for i in "${!order[@]}"; do
+            [[ "${order[$i]}" == "$STAGE" ]] && NEXT="${order[$((i + 1))]:-}"
+          done
+          if [[ -z "$NEXT" || ! -f "clusters/$NEXT/apps.yaml" ]]; then
+            echo "::notice::No stage after $STAGE (${NEXT:-none} has no clusters/<stage>/apps.yaml); nothing to promote."
+            echo "Promotion of \`${APP_VERSION:-unknown}\` from \`$STAGE\`: no next stage, no-op." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "stage=$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Bump RELEASE_ID in the next stage
+        if: steps.next.outputs.stage != ''
+        env:
+          NEXT: ${{ steps.next.outputs.stage }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          RELEASE_ID=$(./scripts/bump-release.sh "$NEXT")
+          git add "clusters/$NEXT/apps.yaml"
+          git commit -m "[keptn-promote] ${APP_VERSION:-unknown} from $STAGE to $NEXT" \
+            -m "New RELEASE_ID: $RELEASE_ID."
+          git push origin HEAD:main
+          echo "Promoted \`${APP_VERSION:-unknown}\` from \`$STAGE\` to \`$NEXT\`; RELEASE_ID \`$RELEASE_ID\`." >> "$GITHUB_STEP_SUMMARY"

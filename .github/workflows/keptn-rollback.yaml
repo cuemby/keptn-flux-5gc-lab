@@ -1,0 +1,131 @@
+# Git rollback requested by the Keptn kpi-guard task (source=keptn) or by Alertmanager through
+# alert-relay (source=alertmanager). From the commit before the last release commit it restores
+# only the release inputs:
+# - the configMapGenerator values selection (`files: [values.yaml=values/...]`) in
+#   apps/open5gs/kustomization.yaml; the resources: list and the rest of the file stay as they are;
+# - the values files that the restored selection references, when they exist in that commit;
+# - the apps/open5gs/helmrelease-*.yaml files that exist in that commit.
+# It never deletes files. It then bumps RELEASE_ID and pushes a plain commit to main, so Flux
+# applies the previous configuration and Keptn evaluates it as a new app version.
+#
+# Guards:
+# - A rollback that landed less than 15 minutes ago makes a second request a quiet no-op
+#   (Keptn and Alertmanager can both ask for the same rollback).
+# - If the last release commit is itself an older rollback, the job stops and asks for a human.
+name: keptn-rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage to roll back (clusters/<stage>/apps.yaml)
+        required: true
+        type: string
+      appVersion:
+        description: Keptn app version that failed (informational)
+        required: false
+        type: string
+      reason:
+        description: Why the rollback was requested
+        required: false
+        type: string
+      source:
+        description: Who requested it (keptn or alertmanager)
+        required: false
+        type: string
+        default: keptn
+
+permissions: {}
+
+concurrency:
+  group: keptn-rollback
+  cancel-in-progress: false
+
+jobs:
+  revert:
+    name: Roll back last release
+    # Rollbacks act on main only; a dispatch on any other ref is ignored.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # push the rollback commit
+    env:
+      STAGE: ${{ inputs.stage }}
+      APP_VERSION: ${{ inputs.appVersion }}
+      REASON: ${{ inputs.reason }}
+      SOURCE: ${{ inputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 50
+          persist-credentials: true   # zizmor: ignore[artipacked] the job pushes; nothing is uploaded
+
+      - name: Validate input
+        run: |
+          [[ "$STAGE" =~ ^[a-z0-9-]+$ ]] || { echo "::error::invalid stage"; exit 1; }
+          [[ "$SOURCE" =~ ^(keptn|alertmanager)$ ]] || { echo "::error::invalid source"; exit 1; }
+          [[ -f "clusters/$STAGE/apps.yaml" ]] || { echo "::error::no clusters/$STAGE/apps.yaml"; exit 1; }
+
+      - name: Find last release commit
+        id: find
+        run: |
+          SHA=$(git log -1 --format=%H -- "clusters/$STAGE/apps.yaml" apps/open5gs/values apps/open5gs/kustomization.yaml 'apps/open5gs/helmrelease-*.yaml')
+          [[ -n "$SHA" ]] || { echo "::error::no release commit in the last 50 commits"; exit 1; }
+          AGE=$(( $(date +%s) - $(git log -1 --format=%ct "$SHA") ))
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          if git log -1 --format=%s "$SHA" | grep -q '\[keptn-rollback\]'; then
+            if [[ "$AGE" -lt 900 ]]; then echo "recent=true" >> "$GITHUB_OUTPUT"; else echo "loop=true" >> "$GITHUB_OUTPUT"; fi
+          fi
+
+      - name: Recent rollback already in flight
+        if: steps.find.outputs.recent == 'true'
+        run: echo "::notice::A rollback for $STAGE landed less than 15 min ago; ignoring duplicate request from $SOURCE."
+
+      - name: Restore release inputs and bump RELEASE_ID
+        if: steps.find.outputs.recent != 'true' && steps.find.outputs.loop != 'true'
+        env:
+          SHA: ${{ steps.find.outputs.sha }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          KUST=apps/open5gs/kustomization.yaml
+          PREV="$RUNNER_TEMP/kustomization-prev.yaml"
+          git show "$SHA^:$KUST" > "$PREV" 2>/dev/null || : > "$PREV"
+          awk 'FILENAME == ARGV[1] {
+                 if ($1 == "-" && $2 == "name:") n = $3
+                 else if ($1 == "files:" && $2 ~ /values\.yaml=values\// && n != "") sel[n] = $0
+                 next
+               }
+               $1 == "-" && $2 == "name:" { n = $3 }
+               $1 == "files:" && (n in sel) { $0 = sel[n] }
+               { print }' "$PREV" "$KUST" > "$KUST.new"
+          mv "$KUST.new" "$KUST"
+          RESTORE=()
+          while read -r f; do
+            git cat-file -e "$SHA^:apps/open5gs/$f" 2>/dev/null && RESTORE+=("apps/open5gs/$f")
+          done < <(grep -oE 'values\.yaml=values/[A-Za-z0-9._-]+' "$KUST" | cut -d= -f2)
+          while read -r f; do
+            [[ "$f" == apps/open5gs/helmrelease-*.yaml ]] && RESTORE+=("$f")
+          done < <(git ls-tree --name-only "$SHA^" apps/open5gs/)
+          if [[ ${#RESTORE[@]} -gt 0 ]]; then
+            git restore --source="$SHA^" --worktree -- "${RESTORE[@]}"
+          fi
+          if git diff --quiet -- "$KUST" "${RESTORE[@]}"; then
+            echo "::error::Nothing to roll back: release commit ${SHA:0:12} changed no release input on $STAGE."
+            exit 1
+          fi
+          RELEASE_ID=$(./scripts/bump-release.sh "$STAGE")
+          git add -- "$KUST" "${RESTORE[@]}" "clusters/$STAGE/apps.yaml"
+          SAFE_REASON=$(printf '%s' "$REASON" | tr -cd '[:alnum:] :._-' | cut -c1-120)
+          SAFE_VERSION=$(printf '%s' "$APP_VERSION" | tr -cd '[:alnum:]._-' | cut -c1-64)
+          git commit -m "[keptn-rollback] restore release inputs before ${SHA:0:12} on $STAGE ($SOURCE): $SAFE_REASON" \
+            -m "Failed app version: ${SAFE_VERSION:-unknown}. New RELEASE_ID: $RELEASE_ID."
+          git push origin HEAD:main
+          echo "Restored release inputs from before \`${SHA:0:12}\` on \`$STAGE\` ($SOURCE); RELEASE_ID \`$RELEASE_ID\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Needs a human
+        if: steps.find.outputs.loop == 'true'
+        run: |
+          echo "::error::Last change was already a rollback and KPIs still breach. Stopping the loop."
+          exit 1

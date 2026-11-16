@@ -16,6 +16,7 @@ resources:
   - keptn/task-promote.yaml
   - keptn/analysis/value-templates.yaml
   - keptn/analysis/definition.yaml
+  - mission-control/alert-relay.yaml
 configMapGenerator:
   # scripts/inject-fault.sh and scripts/heal.sh swap the file on the next line.
   - name: open5gs-values

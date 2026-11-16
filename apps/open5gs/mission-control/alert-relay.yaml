@@ -1,0 +1,132 @@
+# Mission control: Alertmanager -> GitHub workflow_dispatch of keptn-rollback.yaml.
+# Alertmanager's webhook body is not a GitHub dispatch request, so this relay translates it.
+# It acts only on firing alerts labelled action=rollback (Open5GSDegradedAfterRelease) and
+# requests the same Git rollback that the Keptn kpi-guard task requests. Flux applies the rollback commit.
+#
+# The github-dispatch Secret (key SECURE_DATA = {"owner","repo","token"}) is created by
+# scripts/bootstrap.sh. It is optional here: without it the relay still starts and answers
+# 503 "not configured" to alerts, so a lab without a dispatch token stays healthy.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-relay
+  namespace: open5gs
+  annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
+data:
+  main.ts: |
+    const secure = JSON.parse(Deno.env.get("SECURE_DATA") || "{}");
+    const configured = [secure.owner, secure.repo, secure.token].every((v) => typeof v === "string" && v !== "");
+    if (!configured) console.log("github-dispatch Secret missing or incomplete; alerts will not be relayed");
+
+    Deno.serve({ hostname: "0.0.0.0", port: 8080 }, async (req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/healthz") return new Response("ok");
+      if (req.method !== "POST" || url.pathname !== "/alert") return new Response("not found", { status: 404 });
+
+      let body;
+      try {
+        body = await req.json();
+      } catch {
+        return new Response("invalid JSON", { status: 400 });
+      }
+      const alerts = Array.isArray(body?.alerts) ? body.alerts : [];
+      const firing = alerts.filter((a) => a?.status === "firing" && a?.labels?.action === "rollback");
+      if (firing.length === 0) return new Response("ignored");
+
+      const name = String(firing[0].labels.alertname ?? "unknown").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+      if (!configured) {
+        console.log(`alert ${name} not relayed: github-dispatch Secret missing`);
+        return new Response("not configured", { status: 503 });
+      }
+
+      try {
+        const res = await fetch(
+          `https://api.github.com/repos/${encodeURIComponent(secure.owner)}/${encodeURIComponent(secure.repo)}/actions/workflows/keptn-rollback.yaml/dispatches`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${secure.token}`,
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
+            body: JSON.stringify({ ref: "main", inputs: { stage: "lab", reason: `alert ${name}`, source: "alertmanager" } }),
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        if (!res.ok) {
+          const detail = (await res.text()).slice(0, 300);
+          console.log(`rollback dispatch FAILED for ${name}: ${res.status} ${detail}`);
+          return new Response(`dispatch failed ${res.status}`, { status: 502 });
+        }
+        console.log(`rollback dispatch for ${name}: ${res.status}`);
+        return new Response(`dispatched ${res.status}`);
+      } catch (err) {
+        console.log(`rollback dispatch FAILED for ${name}: ${err}`);
+        return new Response("dispatch error", { status: 502 });
+      }
+    });
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-relay
+  namespace: open5gs
+  labels: { app.kubernetes.io/name: alert-relay }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: alert-relay } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: alert-relay } }
+    spec:
+      # Defined in apps/open5gs/task-identity.yaml; no RBAC is bound to it.
+      serviceAccountName: alert-relay
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1993          # the image's "deno" user
+        runAsGroup: 1993
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: relay
+          image: denoland/deno:2.9.8@sha256:a0d88a7fcbd44f062cba2748e19df67d30290ad12aa203c7c1e0b12462c483f0
+          # Network access is limited to the listen socket and the GitHub API.
+          command:
+            - deno
+            - run
+            - --no-prompt
+            - --allow-net=0.0.0.0:8080,api.github.com
+            - --allow-env=SECURE_DATA
+            - --v8-flags=--max-old-space-size=32
+            - /app/main.ts
+          env:
+            - { name: DENO_DIR, value: /deno-dir }
+            - { name: DENO_NO_UPDATE_CHECK, value: "1" }
+            - name: SECURE_DATA
+              valueFrom: { secretKeyRef: { name: github-dispatch, key: SECURE_DATA, optional: true } }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 30, failureThreshold: 3 }
+          volumeMounts:
+            - { name: app, mountPath: /app, readOnly: true }
+            - { name: deno-dir, mountPath: /deno-dir }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }   # measured RSS about 13Mi
+      volumes:
+        - { name: app, configMap: { name: alert-relay } }
+        - { name: deno-dir, emptyDir: { sizeLimit: 64Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-relay
+  namespace: open5gs
+  labels: { app.kubernetes.io/name: alert-relay }
+spec:
+  selector: { app.kubernetes.io/name: alert-relay }
+  ports: [{ name: http, port: 8080, targetPort: http }]

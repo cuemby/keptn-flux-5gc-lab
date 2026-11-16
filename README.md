@@ -22,7 +22,7 @@ Every change is a Git commit, including rollbacks:
       │                                                     │ KPIs from Prometheus
       │                                        pass ─► promote │ fail
       │                                                     ▼
-      └──── GitHub Actions revert commit ◄──── workflow_dispatch (keptn-rollback)
+      └──── GitHub Actions rollback commit ◄──── workflow_dispatch (keptn-rollback)
                        ▲
                        └──── Alertmanager (after the release window) via alert-relay
 ```
