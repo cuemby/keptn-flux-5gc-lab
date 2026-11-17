@@ -192,7 +192,8 @@ workflow's always-run `down` step) then deletes the cluster, while single steps 
 `scripts/e2e.sh down`. A full run takes about
 35 minutes on a laptop-class host (about 15 of them until everything is Ready). The first Keptn
 app version after a fresh install must succeed too: its traffic task waits for UERANSIM, which
-Flux installs only after Open5GS is Ready. After the happy path it also checks the UPF KPIs:
+Flux installs only after Open5GS is Ready, and `kpi-guard` starts its warm-up and soak only once
+UERANSIM's registration traffic reaches the AMF. After the happy path it also checks the UPF KPIs:
 PDU sessions on the UPF, the `UPFNoUserPlaneTraffic` alert not firing, and a one-shot
 `open5gs-slo` Analysis (`examples/analysis-run.yaml`) passing its `upf-sessions` objective.
 

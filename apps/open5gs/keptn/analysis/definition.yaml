@@ -18,7 +18,7 @@ spec:
       weight: 2
     - analysisValueTemplateRef: { name: upf-sessions }
       target:
-        failure: { lessThan: { fixedValue: "1" } }     # a moment in the window with no UPF PDU session
+        failure: { lessThan: { fixedValue: "1" } }     # UPF without PDU sessions for over 10% of the window
       weight: 1
   totalScore:
     passPercentage: 90

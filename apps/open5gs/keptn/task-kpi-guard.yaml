@@ -9,7 +9,7 @@ metadata:
   namespace: open5gs
   annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
 spec:
-  timeout: 20m                                  # trafficWait + warmup + soak, plus query time
+  timeout: 25m                                  # trafficWait + warmup + soak (21m), plus query time
   retries: 0
   ttlSecondsAfterFinished: 600
   serviceAccount: { name: keptn-task-runner }
@@ -20,12 +20,13 @@ spec:
         prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
         # Timing: (1) poll until the AMF sees registration requests in a 2m window, for at most
         # trafficWaitSeconds. On the first release after a bootstrap UERANSIM does not exist yet
-        # (Flux installs it after Open5GS is Ready; traffic-burst waits up to 6m for it). No traffic
-        # by then exits 1 as "no traffic": the task fails, no breach is counted and no rollback is
-        # requested. (2) Once traffic is seen, warm up for warmupSeconds: traffic-burst's gNB and UE
+        # (Flux installs it after Open5GS is Ready). 780s covers traffic-burst's own wait (6m for the
+        # Deployments, then up to 180s for each of the gNB and UE rollouts) plus a scrape and poll
+        # margin. No traffic by then exits 1 as "no traffic": the task fails, no breach is counted
+        # and no rollback is requested. (2) Once traffic is seen, warm up for warmupSeconds: traffic-burst's gNB and UE
         # restarts and the SMF-UPF re-association (about 2.5 minutes on Kind) fall here, not in the
         # soak, and the 2m windows then only see the new release. (3) Soak for soakSeconds.
-        trafficWaitSeconds: "480"
+        trafficWaitSeconds: "780"
         warmupSeconds: "180"
         soakSeconds: "300"
         pollSeconds: "30"
