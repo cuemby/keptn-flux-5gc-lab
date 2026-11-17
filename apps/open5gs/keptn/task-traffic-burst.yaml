@@ -31,9 +31,20 @@ spec:
         kubectl rollout restart "deployment/$GNB_DEPLOYMENT"
         kubectl rollout status "deployment/$GNB_DEPLOYMENT" --timeout=120s
         sleep 5
-        kubectl rollout restart "deployment/$UE_DEPLOYMENT"
-        kubectl rollout status "deployment/$UE_DEPLOYMENT" --timeout=120s
-        sleep 15
+        # Right after a release the SMF may still be re-associating with the new UPF, and a UE whose
+        # PDU session fails does not retry it: wait for the tunnel, restart the UEs again if needed.
+        for attempt in 1 2 3; do
+          kubectl rollout restart "deployment/$UE_DEPLOYMENT"
+          kubectl rollout status "deployment/$UE_DEPLOYMENT" --timeout=120s
+          up=0
+          for _ in $(seq 1 15); do
+            p=$(kubectl get pods -l "$UE_SELECTOR" --field-selector=status.phase=Running -o name | head -n 1)
+            if [ -n "$p" ] && kubectl exec "$p" -- ip link show "$UE_TUN" >/dev/null 2>&1; then up=1; break; fi
+            sleep 2
+          done
+          [ "$up" = 1 ] && break
+          echo "no PDU session on $UE_TUN yet (attempt $attempt)"
+        done
         for p in $(kubectl get pods -l "$UE_SELECTOR" --field-selector=status.phase=Running -o name); do
           kubectl exec "$p" -- ping -I "$UE_TUN" -c 60 -i 0.5 "$UPF_GW" || echo "ping failed on $p"
         done

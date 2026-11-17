@@ -16,9 +16,9 @@ spec:
     parameters:
       map:
         prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
-        # The task starts as soon as the NFs are rolled, before the gNB and UEs are back. Wait one
-        # full KPI window (2m) so the queries only see the new release's traffic.
-        warmupSeconds: "120"
+        # The task starts as soon as the NFs are rolled, before the gNB, UEs and SMF-UPF association
+        # are back (about 2.5 minutes on Kind). Wait so the 2m windows only see the new release.
+        warmupSeconds: "180"
         soakSeconds: "300"
         pollSeconds: "30"
         minRegSuccess: "0.95"
@@ -56,6 +56,7 @@ spec:
                "clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m])), 1)")
         # Not the N3 packet counter: Open5GS 2.8.0 never increments it; see task-kpi-guard.yaml.
         SESS = "sum(fivegs_upffunction_upf_sessionnbr)"
+        PDUREQ = "sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m]))"
 
         print("warm-up: waiting {}s for the new release's traffic".format(data.get("warmupSeconds", "0")), flush=True)
         time.sleep(int(data.get("warmupSeconds", "0")))
@@ -65,11 +66,12 @@ spec:
             req = query(REQ)
             if req > 0:
                 samples += 1
-                reg, pdu, sessions = query(REG), query(PDU), query(SESS)
-                print(json.dumps({"req": req, "reg": reg, "pdu": pdu, "sessions": sessions}), flush=True)
+                reg, pdu, sessions, pdu_req = query(REG), query(PDU), query(SESS), query(PDUREQ)
+                print(json.dumps({"req": req, "reg": reg, "pduReq": pdu_req, "pdu": pdu, "sessions": sessions}), flush=True)
                 # "not x >= min" also treats a missing sample or failed query (NaN) as a breach
-                bad = (not reg >= float(data["minRegSuccess"]) or not pdu >= float(data["minPduSuccess"])
-                       or not sessions > 0)
+                # The PDU ratio only counts when the SMF saw requests (see task-kpi-guard.yaml).
+                pdu_bad = pdu_req > 0 and not pdu >= float(data["minPduSuccess"])
+                bad = not reg >= float(data["minRegSuccess"]) or pdu_bad or not sessions > 0
                 breaches = breaches + 1 if bad else 0
                 if breaches >= 2:
                     break

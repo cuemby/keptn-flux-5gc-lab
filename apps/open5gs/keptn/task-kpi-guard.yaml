@@ -18,9 +18,9 @@ spec:
     parameters:
       map:
         prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
-        # The task starts as soon as the NFs are rolled, before the gNB and UEs are back. Wait one
-        # full KPI window (2m) so the queries only see the new release's traffic.
-        warmupSeconds: "120"
+        # The task starts as soon as the NFs are rolled, before the gNB, UEs and SMF-UPF association
+        # are back (about 2.5 minutes on Kind). Wait so the 2m windows only see the new release.
+        warmupSeconds: "180"
         soakSeconds: "300"
         pollSeconds: "30"
         minRegSuccess: "0.95"
@@ -60,6 +60,7 @@ spec:
         // Not the N3 packet counter: Open5GS 2.8.0 exports fivegs_ep_n3_gtp_indatapktn3upf but
         // never increments it (stays 0 while UE pings pass), so active UPF sessions stand in.
         const SESS = "sum(fivegs_upffunction_upf_sessionnbr)";
+        const PDUREQ = "sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m]))";
 
         console.log(`warm-up: waiting ${data.warmupSeconds ?? 0}s for the new release's traffic`);
         await new Promise((r) => setTimeout(r, Number(data.warmupSeconds ?? 0) * 1000));
@@ -72,9 +73,13 @@ spec:
             const reg = await query(REG);
             const pdu = await query(PDU);
             const sessions = await query(SESS);
-            console.log(JSON.stringify({ req, reg, pdu, sessions }));
-            // "!(x >= min)" also treats a missing sample or failed query (NaN) as a breach
-            const bad = !(reg >= Number(data.minRegSuccess)) || !(pdu >= Number(data.minPduSuccess)) || !(sessions > 0);
+            const pduReq = await query(PDUREQ);
+            console.log(JSON.stringify({ req, reg, pduReq, pdu, sessions }));
+            // "!(x >= min)" also treats a missing sample or failed query (NaN) as a breach. The PDU
+            // ratio only counts when the SMF saw requests: a fresh SMF's counter series appears at
+            // its first value, so increase() reads 0 for a while; sessions catches a dead user plane.
+            const pduBad = pduReq > 0 && !(pdu >= Number(data.minPduSuccess));
+            const bad = !(reg >= Number(data.minRegSuccess)) || pduBad || !(sessions > 0);
             breaches = bad ? breaches + 1 : 0;
             if (breaches >= 2) break;
           } else {
