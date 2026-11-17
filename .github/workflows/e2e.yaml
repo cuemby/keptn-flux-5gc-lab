@@ -12,7 +12,7 @@ name: e2e
 #   the full profile (3 nodes, kindnet) and on the light profile with Cilium, where scenario 7
 #   (NetworkPolicies and SCTP) runs too. Too slow for every pull request.
 # The GitHub side of rollbacks and promotions, the loop guard and mission control need a real
-# repository and tokens: scripts/live-github-check.sh.
+# repository and tokens: scripts/live-github-check.sh (live-github-check.yaml in a sandbox).
 on:
   pull_request:
   schedule:

@@ -236,14 +236,29 @@ Cilium, where scenario 7 runs too.
 The GitHub side of a rollback or promotion, the loop guard (scenario 3) and mission control
 (scenario 9) need a real repository and the two tokens. `scripts/live-github-check.sh` runs them
 end to end against a throwaway repository (default `cuemby/keptn-flux-5gc-lab-sandbox`; only names
-ending in `-sandbox` unless `LIVE_ALLOW_ANY_REPO=1`):
+ending in `-sandbox` unless `LIVE_ALLOW_ANY_REPO=1`).
+
+The easiest way is to run it on a GitHub-hosted runner inside the sandbox itself, with
+`.github/workflows/live-github-check.yaml` (workflow_dispatch; it does nothing in other repositories):
+
+1. Copy the lab tree to the sandbox's `main`, workflows included, without `e2e.yaml` and
+   `validate.yaml`. Use your own credentials: the bootstrap token cannot change workflow files.
+2. Add the tokens to the sandbox only, without echoing them:
+   `gh secret set LIVE_BOOTSTRAP_TOKEN -R <owner>/<repo>-sandbox` (Administration and Contents
+   write) and `gh secret set LIVE_DISPATCH_TOKEN -R <owner>/<repo>-sandbox` (Actions write); each
+   reads the value from stdin.
+3. `gh workflow run live-github-check.yaml -R <owner>/<repo>-sandbox`. The job summary and the
+   `live-github-check` artifact hold the results (and diagnostics on failure).
+
+Or run it from a checkout, on a host with at least 6 GB available:
 
 ```bash
 scripts/live-github-check.sh --creds ./creds.env [owner/repo]   # GITHUB_TOKEN, KEPTN_DISPATCH_TOKEN
 ```
 
 It pushes the lab tree of the current `HEAD` commit to the repository's `main` (without the e2e
-and validate workflows), bootstraps the light profile against it with `scripts/bootstrap.sh`, then:
+and validate workflows; the repository's `.github` must already match, or it stops before
+pushing), bootstraps the light profile against it with `scripts/bootstrap.sh`, then:
 
 - promote: the first release passes and `keptn-promote.yaml` runs on GitHub;
 - rollback (scenario 2): a faulty release; `kpi-guard` dispatches `keptn-rollback.yaml`, its
@@ -255,8 +270,8 @@ and validate workflows), bootstraps the light profile against it with `scripts/b
   then `keptn-rollback.yaml` stops in "Needs a human".
 
 It refuses to start while any Kind cluster exists or with less than 6 GB available, stops below
-1 GB, and on exit deletes the cluster, the Flux deploy key and the credentials file, whatever the
-outcome. Tokens never reach process arguments or output. A run lasts a few hours (several
+1 GB, and on exit deletes the cluster, puts the starting lab tree back on `main`, and deletes the
+Flux deploy key and the credentials file, whatever the outcome. Tokens never reach process arguments or output. A run lasts a few hours (several
 releases and a 15-minute degradation); results and workflow run URLs are written to
 `$LIVE_DIR/results.md`.
 

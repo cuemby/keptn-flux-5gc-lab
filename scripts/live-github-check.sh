@@ -20,8 +20,12 @@
 #   owner/repo   target repository (default cuemby/keptn-flux-5gc-lab-sandbox). Its main branch
 #                receives the lab tree of this checkout's HEAD commit (without the e2e and validate
 #                workflows) on top of its history, Flux bootstrap commits, scenario commits and the
-#                workflows' rollback commits. Use a throwaway repository: only names ending in
-#                "-sandbox" are accepted unless LIVE_ALLOW_ANY_REPO=1.
+#                workflows' rollback commits; when the run ends, main gets the starting lab tree
+#                back, so the next run starts clean. Use a throwaway repository: only names ending
+#                in "-sandbox" are accepted unless LIVE_ALLOW_ANY_REPO=1. The bootstrap token cannot
+#                change workflow files, so the target's .github must already match this checkout's
+#                (minus e2e.yaml and validate.yaml); the run stops before pushing anything if not.
+#                .github/workflows/live-github-check.yaml runs this script inside the target itself.
 #   --creds      file with GITHUB_TOKEN (bootstrap: Administration and Contents write on the
 #                repository) and KEPTN_DISPATCH_TOKEN (Actions write), one KEY=value per line.
 #                The file is read as data, never executed, and DELETED when the run ends, whatever
@@ -34,6 +38,8 @@
 #   LIVE_MIN_AVAIL_MIB  refuse to start below this much available memory (default 6144); Linux only
 #   LIVE_MEM_FLOOR_MIB  stop the run below this much available memory (default 1024); Linux only
 #   LIVE_SCENARIOS      scenarios to run, in this order (default "promote rollback mission loop-guard")
+#   LIVE_DIAG_DIR       when set and the run fails, scripts/collect-diagnostics.sh writes the
+#                       cluster state there before the cluster is deleted (no Secrets)
 #
 # Runs the light profile with kindnet (scripts/bootstrap.sh, cluster keptn-5gc) and refuses to start
 # while any Kind cluster exists. On exit it deletes the Kind cluster, the Flux deploy key that
@@ -99,13 +105,23 @@ BOOT_TOKEN=""
 DISPATCH_TOKEN=""
 GUARD_PID=""
 CLUSTER_CREATED=0
+START_SHA=""
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
   [[ -n "$GUARD_PID" ]] && { kill "$GUARD_PID" 2>/dev/null || true; }
   if (( CLUSTER_CREATED )); then
+    if [[ -n "${LIVE_DIAG_DIR:-}" ]] && { (( rc != 0 )) || grep -q '^- \*\*FAIL' "$LIVE_DIR/results.md" 2>/dev/null; }; then
+      log "Collecting diagnostics into $LIVE_DIAG_DIR"
+      "$REPO_ROOT/scripts/collect-diagnostics.sh" "$LIVE_DIAG_DIR" >/dev/null 2>&1 || true
+      cp "$LIVE_DIR/results.md" "$LIVE_DIR/memory.log" "$LIVE_DIAG_DIR/" 2>/dev/null || true
+    fi
     log "Deleting Kind cluster $CLUSTER"
     kind delete cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" 2>/dev/null || true
+  fi
+  if [[ -n "$BOOT_TOKEN" && -n "$START_SHA" ]]; then
+    log "Restoring the starting lab tree on $TARGET main"
+    restore_tree || echo "warning: could not restore the lab tree on $TARGET main" >&2
   fi
   if [[ -n "$BOOT_TOKEN" ]] && (( CLUSTER_CREATED )); then
     log "Removing the Flux deploy key from $TARGET"
@@ -203,6 +219,18 @@ git_remote() {
     -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$LIVE_GIT_TOKEN"; }; f' "$@"
 }
 
+# restore_tree: put the lab tree of START_SHA (pushed by setup) back on main, undoing the scenario
+# and rollback commits, so the next run starts from a healthy lab.
+restore_tree() {
+  git_remote fetch -q origin main || return 1
+  git -C "$CLONE" reset -q --hard origin/main || return 1
+  git -C "$CLONE" read-tree -u --reset "$START_SHA" || return 1
+  if git -C "$CLONE" diff --cached --quiet; then return 0; fi
+  git -C "$CLONE" commit -qm "live-github-check: restore the lab tree of ${START_SHA:0:12}" || return 1
+  push || return 1
+  result INFO "repository $TARGET main restored to the lab tree of ${START_SHA:0:12} at $(git -C "$CLONE" rev-parse --short HEAD)"
+}
+
 delete_deploy_keys() {
   local ids id
   ids="$(gh_api boot GET "/repos/$OWNER/$REPO/keys?per_page=100" | jq -r '.[] | select(.title | startswith("flux-system-")) | .id')" || return 1
@@ -288,7 +316,12 @@ setup() {
   # The sandbox runs only the workflows under test.
   rm -f "$CLONE/.github/workflows/e2e.yaml" "$CLONE/.github/workflows/validate.yaml"
   commit "live-github-check: lab tree at ${sha:0:12}" || true
+  # The bootstrap token has no Workflows permission: GitHub refuses pushes that change .github.
+  if ! git -C "$CLONE" diff --quiet origin/main HEAD -- .github; then
+    die "$TARGET .github differs from this checkout's (without e2e.yaml and validate.yaml): $(git -C "$CLONE" diff --name-only origin/main HEAD -- .github | tr '\n' ' ')- push the workflows under test first with a token that may change workflows"
+  fi
   push
+  START_SHA="$(git -C "$CLONE" rev-parse HEAD)"
   result INFO "repository $TARGET main at $(git -C "$CLONE" rev-parse --short HEAD): lab tree of ${sha:0:12}"
 
   # flux bootstrap needs --personal for a user's repository, not for an organization's.
