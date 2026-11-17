@@ -60,8 +60,9 @@ action?" to "what would it take to integrate Keptn into a real delivery pipeline
 
 `scripts/bootstrap.sh` refuses to create a new cluster on Linux when less memory than this is
 available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused without the
-check. These figures are targets for the lab's resource requests; measured numbers will be added
-once the end-to-end runs are in place.
+check. Measured with `scripts/e2e.sh` on the light profile (whole lab with tracing, Open5GS,
+UERANSIM and the Keptn tasks running): the two Kind node containers peaked at about 3.9 GB, so
+6 GB free leaves room for image pulls and the host. The full profile has not been measured.
 
 Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Both enforce the lab's
 NetworkPolicies (kindnet does since Kind v0.24); Cilium is needed for SCTP tests
