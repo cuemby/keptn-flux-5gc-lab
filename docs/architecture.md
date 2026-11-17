@@ -78,7 +78,7 @@ Every namespace warns and audits at the next stricter level (`baseline` or `rest
 ## Release flow
 
 1. `make bump` (`scripts/bump-release.sh lab`) writes a new UTC timestamp `RELEASE_ID`
-   (`lab-YYYYMMDD-HHMMSS`) into `clusters/lab/apps.yaml`, then commits and pushes.
+   (`lab-YYYYMMDD-HHMMSS`) into `clusters/lab/apps.yaml`. It does not commit; commit and push yourself.
 2. Flux substitutes `${RELEASE_ID}` into the `open5gs` HelmRelease. Its post-renderer writes
    `keptn.sh/app: open5gs`, `keptn.sh/version: <RELEASE_ID>` and `keptn.sh/workload: amf|smf|nssf|upf`
    on the four NF pod templates, and also sets `keptn.sh/workload` as a pod label. The changed
@@ -144,7 +144,10 @@ There is no pull-request mode: on a fork with branch protection on `main`, allow
 so it catches degradation that appears while the release is in operation, after Keptn passed it.
 Alertmanager routes alerts labelled `action="rollback"` to the `alert-relay` Deployment in
 `open5gs`, a small Deno service that turns a firing alert into a `keptn-rollback.yaml` dispatch. A
-rollback restores the last committed configuration, so Flux also reverts manual drift (scenario 9).
+rollback needs a previous state to restore: the last release must have changed a release input
+(a `RELEASE_ID`-only release fails with "Nothing to roll back"), and a `[keptn-rollback]` commit as
+the last release stops it in "Needs a human". When it runs, the rollback commit produces a new Helm
+release of `open5gs`, which also brings back what was changed by hand outside Git (scenario 9).
 
 ## Adding a second stage
 

@@ -8,13 +8,13 @@ and push to your fork, so Flux picks the change up within a minute.
 |---|---|---|---|---|
 | 1 | Happy path | `make bump`, then commit and push | AMF, SMF, NSSF and UPF roll; traffic-burst runs; kpi-guard passes; the evaluation passes; promote runs. One green Jaeger trace. | 1, 2, 3 |
 | 2 | Bad config, Keptn rollback | `make fault` | PDU sessions fail, so the UPF holds no session. kpi-guard dispatches a rollback; a rollback commit appears; Flux applies it; the next release passes. | 4, 6, 7 |
-| 3 | Loop guard | Make the good config bad too, then `make fault` | One rollback, then "Needs a human" | 7 |
+| 3 | Loop guard | Commit a bad `open5gs-good.yaml` without a bump, then `NO_PUSH=1 make fault` and `git push` | One rollback, then "Needs a human" | 7 |
 | 4 | No traffic | Suspend `traffic-pulse` and remove `traffic-burst` from the app context, bump, commit and push | kpi-guard fails with "no registration traffic"; no rollback | 6 |
 | 5 | Flux failure | Commit an invalid HelmRelease | `FluxReconciliationFailing`; Keptn never starts | 8 |
 | 6 | RBAC | `scripts/rbac-check.sh` (or `add-user.sh alice lab:keptn-authors` and the matrix) | Every check matches [security.md](security.md#check-matrix) | 3 |
 | 7 | NetworkPolicy | curl the AMF metrics port from `default` | Denied; scrapes, Keptn queries and the alert relay still work | 8 |
 | 8 | Admission | A pod with `busybox:latest` in `open5gs` | Warning | 8 |
-| 9 | Mission control | After a release passes, break the core directly with `kubectl` (outside Git) | Keptn is no longer watching; after 15 minutes `Open5GSDegradedAfterRelease` fires and alert-relay dispatches; the rollback restores the last committed state and Flux reverts the drift | 8 |
+| 9 | Mission control | Release a change to a release input (not a `RELEASE_ID`-only bump); once it passed and is at least 15 minutes old, break the core directly with `kubectl` (outside Git) | Keptn is no longer watching; after 15 minutes `Open5GSDegradedAfterRelease` fires and alert-relay dispatches; the rollback commit produces a new Helm release, which brings the UDM back | 8 |
 | 10 | SLO analysis | `kubectl create -f examples/analysis-run.yaml` during healthy traffic, then during `make fault` | Pass, then fail, with per-objective scores | 4, 5 |
 | 11 | Python runtime | Swap `kpi-guard` for `kpi-guard-py` in the app context, then repeat scenario 2 | Same outcome; compare the two task definitions | 2 |
 
@@ -123,9 +123,18 @@ commit, not a Keptn action).
 
 ## 3. Loop guard
 
-Make the good config bad too, so a rollback cannot help: copy the SMF DNN change from
-`open5gs-fault-slice.yaml` into `open5gs-good.yaml`, run `make bump`, commit and push, then run
-`make fault`.
+Make the good config bad too, so a rollback cannot help:
+
+```bash
+cp apps/open5gs/values/open5gs-fault-slice.yaml apps/open5gs/values/open5gs-good.yaml
+git commit -am "make the good config bad too"   # no make bump
+NO_PUSH=1 make fault                             # commits the fault release without pushing
+git push
+```
+
+Pushing the bad `open5gs-good.yaml` together with the fault means Flux never applies it as a
+release of its own, whose rollback would restore the healthy `open5gs-good.yaml` from the commit
+before it.
 
 Expected: one `[keptn-rollback]` commit. The release that rollback produces fails too, and its
 `kpi-guard` asks for a rollback of a different app version within 15 minutes, so
@@ -201,7 +210,21 @@ Which question did this answer? 8.
 
 ## 9. Mission control
 
-After a release passes, break the core outside Git, for example as a 5GC operator:
+First release a change to a release input, so the rollback has a previous state to restore. A
+`RELEASE_ID`-only release (a plain `make bump`) leaves nothing to roll back, and the workflow fails
+with "Nothing to roll back"; a `[keptn-rollback]` commit as the last release (after scenario 2 or
+3) makes it stop in "Needs a human". For example:
+
+```bash
+echo "# scenario 9 release" >> apps/open5gs/values/open5gs-good.yaml
+make bump
+git commit -am "release before the scenario 9 break"
+git push
+```
+
+Wait until that release passes and is at least 15 minutes old: an Alertmanager request less than
+15 minutes after a release commit is ignored as "Degradation predates the release". Then break the
+core outside Git, for example as a 5GC operator:
 
 ```bash
 kubectl -n open5gs scale deployment/open5gs-udm --replicas=0
@@ -209,11 +232,9 @@ kubectl -n open5gs scale deployment/open5gs-udm --replicas=0
 
 Expected: Keptn is no longer watching (the release window closed). Registrations fail, and after
 15 minutes `Open5GSDegradedAfterRelease` fires. Alertmanager posts it to `alert-relay`, which
-dispatches `keptn-rollback.yaml` (`source: alertmanager`). The rollback commit restores the last
-committed good configuration and, because Flux reconciles the whole `apps` Kustomization, also
-reverts the manual scale-down. An Alertmanager request less than 15 minutes after a release commit
-is ignored as "Degradation predates the release", so wait until the release is at least 15 minutes
-old before you break it.
+dispatches `keptn-rollback.yaml` (`source: alertmanager`). The rollback commit restores the release
+inputs from before your release and bumps `RELEASE_ID`. Flux applies it, helm-controller upgrades
+`open5gs` to a new Helm release, and that upgrade brings the UDM back to its declared replica count.
 
 Which question did this answer? 8 (Keptn launch control vs Alertmanager mission control; Flux
 applies both).
