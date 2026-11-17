@@ -438,13 +438,19 @@ release() {
   release_id
 }
 
-# prom_api <path>: GET from the Prometheus HTTP API inside its own pod (no port-forward, and the
-# observability NetworkPolicies do not apply to localhost).
+# prom_api <path>: GET from the Prometheus HTTP API through a short-lived port-forward to the
+# Prometheus pod. The Prometheus image ships no wget/curl, and a port-forward reaches the pod's
+# localhost, so the observability NetworkPolicies do not apply.
 prom_api() {
-  local pod
+  local pod pf rc=0
   pod="$(kubectl -n observability get pods -l app.kubernetes.io/name=prometheus -o name | head -n 1)"
   [[ -n "$pod" ]] || return 1
-  kubectl -n observability exec "$pod" -c prometheus -- wget -qO- "http://localhost:9090$1"
+  kubectl -n observability port-forward --address 127.0.0.1 "$pod" 19090:9090 >/dev/null 2>&1 &
+  pf=$!
+  curl -fsS --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:19090$1" || rc=$?
+  kill "$pf" 2>/dev/null || true
+  wait "$pf" 2>/dev/null || true
+  return "$rc"
 }
 
 # check_upf_kpis: the UPF user-plane KPIs read UPF PDU sessions (fivegs_upffunction_upf_sessionnbr),
