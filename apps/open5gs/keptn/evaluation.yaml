@@ -7,4 +7,5 @@ spec:
     - { keptnMetricRef: { name: smf-pdu-success-ratio, namespace: open5gs }, evaluationTarget: ">0.95" }
     - { keptnMetricRef: { name: amf-registered-subscribers, namespace: open5gs }, evaluationTarget: ">0" }
     - { keptnMetricRef: { name: upf-sessions, namespace: open5gs }, evaluationTarget: ">0" }
-    - { keptnMetricRef: { name: upf-n3-in-pkt-rate, namespace: open5gs }, evaluationTarget: ">0" }
+    # No upf-n3-in-pkt-rate objective: Open5GS 2.8.0 never increments the N3 packet counter
+    # (see keptn/metrics.yaml), so ">0" would fail every release; upf-sessions covers the UPF.

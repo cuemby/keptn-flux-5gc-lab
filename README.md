@@ -45,6 +45,10 @@ action?" to "what would it take to integrate Keptn into a real delivery pipeline
   plane (the UPF and UEs use `/dev/net/tun`).
 - [Kind](https://kind.sigs.k8s.io/) v0.33.0 or later, kubectl v1.37, the
   [Flux CLI](https://fluxcd.io/flux/installation/) 2.x (tested pins below), Helm 3 or 4, `openssl`.
+  With [mise](https://mise.jdx.dev/), `mise install` in the repository root installs the exact
+  versions pinned in `mise.toml` (Kind 0.33.0, Flux 2.10.0, kubectl, Helm, kustomize, kubeconform,
+  yq, jq, shellcheck, actionlint, gitleaks); the e2e workflow uses the same file. Otherwise install
+  them by hand from the links above.
 - Two fine-grained GitHub tokens scoped to your fork (see [Quick start](#4-quick-start)).
 
 ### Profiles
@@ -56,8 +60,9 @@ action?" to "what would it take to integrate Keptn into a real delivery pipeline
 
 `scripts/bootstrap.sh` refuses to create a new cluster on Linux when less memory than this is
 available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused without the
-check. These figures are targets for the lab's resource requests; measured numbers will be added
-once the end-to-end runs are in place.
+check. Measured with `scripts/e2e.sh` on the light profile (whole lab with tracing, Open5GS,
+UERANSIM and the Keptn tasks running): the two Kind node containers peaked at about 3.9 GB, so
+6 GB free leaves room for image pulls and the host. The full profile has not been measured.
 
 Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Both enforce the lab's
 NetworkPolicies (kindnet does since Kind v0.24); Cilium is needed for SCTP tests
@@ -165,6 +170,34 @@ kube-prometheus-stack versions, so misspelled fields in custom resources fail to
 the Open5GS release inputs (`apps/open5gs/values/`, `apps/open5gs/helmrelease-*.yaml`,
 `apps/open5gs/kustomization.yaml` and the `open5gs` and `ueransim-gnb` chart sources in
 `infrastructure/sources/oci.yaml`) come with a `RELEASE_ID` bump in `clusters/lab/apps.yaml`.
+
+### End-to-end test
+
+```bash
+scripts/e2e.sh all   # Kind (light profile) + Flux + scenarios 1 and 2, then deletes the cluster
+```
+
+`scripts/e2e.sh` needs no GitHub token. It copies the working tree into a scratch Git repository,
+pushes it as an OCI artifact to a local registry on the Kind network, and installs Flux with an
+`OCIRepository` named `flux-system` in place of the `GitRepository` that `flux bootstrap`
+creates. Scenario changes are made with the lab's own scripts (`bump-release.sh` and
+`inject-fault.sh` with `NO_PUSH=1`) and pushed as new artifacts. The Keptn tasks send
+their `workflow_dispatch` calls to a GitHub API mock in namespace `e2e` (the optional `api` key
+of the `github-dispatch` Secret), so a rollback or promotion is checked as *requested*; the
+`keptn-rollback` and `keptn-promote` workflows do not run. Steps can run one at a time
+(`up`, `flux`, `wait`, `baseline`, `happy`, `fault`, `diag`, `down`); see the header of
+the script. It records host and Kind node memory every 15 s and stops the run when available
+memory falls below `E2E_MEM_FLOOR_MIB` (default 1024); `scripts/e2e.sh all` (and the CI
+workflow's always-run `down` step) then deletes the cluster, while single steps leave it for
+`scripts/e2e.sh down`. A full run takes about
+35 minutes on a laptop-class host (about 15 of them until everything is Ready). The first Keptn
+app version after a fresh install is recorded but not asserted: its traffic task starts before
+UERANSIM is installed, so it fails and kpi-guard requests a rollback.
+
+The `e2e` workflow runs the same steps on every pull request on a GitHub-hosted runner and uploads
+diagnostics (`scripts/collect-diagnostics.sh`) when a step fails. Not covered there: the GitHub
+side of a rollback or promotion (needs the dispatch token), scenario 9 (alert-relay, 15 minutes
+of degradation), Cilium and SCTP (scenario 7), and the RBAC matrix (scenario 6).
 
 ## 12. References
 

@@ -15,3 +15,28 @@ spec:
     - { kind: ConfigMap, name: ueransim-values, valuesKey: values.yaml }
   upgrade:
     remediation: { retries: 0 }
+  postRenderers:
+    # Both Deployments carry app.kubernetes.io/name=ueransim-gnb, so Keptn (which adopts every pod
+    # in open5gs) would treat them as one workload whose version flips between the two pod specs;
+    # the e2e run showed the gNB pod then stays SchedulingGated. Give each its own workload and a
+    # fixed version (the UERANSIM release), so traffic restarts never create new Keptn versions.
+    - kustomize:
+        patches:
+          - target: { kind: Deployment, name: ueransim-gnb }
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata: { name: ueransim-gnb }
+              spec:
+                template:
+                  metadata:
+                    annotations: { keptn.sh/app: ueransim, keptn.sh/workload: gnb, keptn.sh/version: "3.2.6" }
+          - target: { kind: Deployment, name: ueransim-gnb-ues }
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata: { name: ueransim-gnb-ues }
+              spec:
+                template:
+                  metadata:
+                    annotations: { keptn.sh/app: ueransim, keptn.sh/workload: ues, keptn.sh/version: "3.2.6" }

@@ -36,6 +36,9 @@ spec:
   query: "sum(fivegs_upffunction_upf_sessionnbr)"
   fetchIntervalSeconds: 15
 ---
+# Reads 0 with Open5GS 2.8.0: the UPF exports fivegs_ep_n3_gtp_indatapktn3upf but never
+# increments it (checked live with UE pings through the UPF). Kept for later Open5GS versions;
+# not used by the evaluation or kpi-guard.
 apiVersion: metrics.keptn.sh/v1
 kind: KeptnMetric
 metadata: { name: upf-n3-in-pkt-rate, namespace: open5gs }
