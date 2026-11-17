@@ -34,8 +34,8 @@
 #   REGISTRY_PORT       host port of the local registry (default 5001)
 #   E2E_MIN_AVAIL_MIB   do not create the cluster below this much available memory (default 6144,
 #                       the light-profile figure from scripts/bootstrap.sh); Linux only
-#   E2E_MEM_FLOOR_MIB   abort the run and delete the cluster when available memory falls below
-#                       this (default 1024); Linux only
+#   E2E_MEM_FLOOR_MIB   stop the run when available memory falls below this (default 1024);
+#                       `all` then deletes the cluster, single steps leave it for `down`; Linux only
 #   E2E_KEEP=1          `all`: keep the cluster at the end
 #   E2E_DIAG_DIR        `all`: where diagnostics go on failure (default $E2E_DIR/diagnostics)
 #   READY_TIMEOUT       seconds for `wait` (default 1800)
