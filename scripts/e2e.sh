@@ -20,7 +20,8 @@
 #   baseline    the first Keptn app version after the install succeeds (no rollback requested)
 #               and Keptn manages only the four NFs (amf, smf, nssf, upf)
 #   happy       scenario 1: bump RELEASE_ID; the app version succeeds, evaluation passes,
-#               promotion dispatched
+#               promotion dispatched; the UPF holds PDU sessions, UPFNoUserPlaneTraffic is not
+#               firing and an open5gs-slo Analysis passes its upf-sessions objective
 #   fault       scenario 2: faulty config (SMF DNN mismatch); kpi-guard fails and requests a
 #               rollback, promotion skipped
 #   diag [dir]  collect diagnostics (scripts/collect-diagnostics.sh)
@@ -437,6 +438,51 @@ release() {
   release_id
 }
 
+# prom_api <path>: GET from the Prometheus HTTP API inside its own pod (no port-forward, and the
+# observability NetworkPolicies do not apply to localhost).
+prom_api() {
+  local pod
+  pod="$(kubectl -n observability get pods -l app.kubernetes.io/name=prometheus -o name | head -n 1)"
+  [[ -n "$pod" ]] || return 1
+  kubectl -n observability exec "$pod" -c prometheus -- wget -qO- "http://localhost:9090$1"
+}
+
+# check_upf_kpis: the UPF user-plane KPIs read UPF PDU sessions (fivegs_upffunction_upf_sessionnbr),
+# not the N3 GTP-U counter Open5GS 2.8.0 never increments. On a healthy lab: the UPF holds
+# sessions, UPFNoUserPlaneTraffic is loaded on that metric and not firing, and a one-shot
+# open5gs-slo Analysis (examples/analysis-run.yaml) passes its upf-sessions objective.
+check_upf_kpis() {
+  local q sessions rule an deadline state raw upf
+  q="$(jq -rn '"sum(fivegs_upffunction_upf_sessionnbr)" | @uri')"
+  sessions="$(prom_api "/api/v1/query?query=$q" | jq -r '.data.result[0].value[1] // "none"')" ||
+    fail "upf: Prometheus query failed"
+  echo "    UPF PDU sessions: $sessions"
+  awk -v s="$sessions" 'BEGIN { exit !(s + 0 >= 1) }' || fail "upf: sum(fivegs_upffunction_upf_sessionnbr)=$sessions (want >= 1)"
+
+  rule="$(prom_api "/api/v1/rules?type=alert" |
+    jq -c '[.data.groups[].rules[] | select(.name == "UPFNoUserPlaneTraffic")][0] // empty')" ||
+    fail "upf: Prometheus rules query failed"
+  [[ -n "$rule" ]] || fail "upf: alert UPFNoUserPlaneTraffic is not loaded in Prometheus"
+  echo "    UPFNoUserPlaneTraffic: state=$(jq -r .state <<<"$rule") health=$(jq -r .health <<<"$rule")"
+  jq -e '.query | contains("fivegs_upffunction_upf_sessionnbr")' <<<"$rule" >/dev/null ||
+    fail "upf: UPFNoUserPlaneTraffic does not read fivegs_upffunction_upf_sessionnbr"
+  jq -e '.health == "ok" and .state != "firing"' <<<"$rule" >/dev/null ||
+    fail "upf: UPFNoUserPlaneTraffic is $(jq -r '"\(.state)/\(.health)"' <<<"$rule") on a healthy lab (want not firing, health ok)"
+
+  an="$(kubectl create -f "$REPO_ROOT/examples/analysis-run.yaml" -o name)" || fail "upf: could not create the open5gs-slo Analysis"
+  deadline=$(( SECONDS + 300 ))
+  until state="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.state}')"; [[ "$state" == Completed ]]; do
+    (( SECONDS < deadline )) || fail "upf: $an not Completed after 300s (state ${state:-none})"
+    sleep 10
+  done
+  raw="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.raw}')"
+  jq -r '.objectiveResults[] | "    analysis \(.objective.analysisValueTemplateRef.name): value=\(.value) pass=\(.result.pass)"' <<<"$raw"
+  echo "    analysis ${an#*/}: pass=$(jq -r .pass <<<"$raw") warning=$(jq -r .warning <<<"$raw") score=$(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw")"
+  upf="$(jq -c '[.objectiveResults[] | select(.objective.analysisValueTemplateRef.name == "upf-sessions")][0] // empty' <<<"$raw")"
+  [[ -n "$upf" ]] || fail "upf: $an has no upf-sessions objective"
+  jq -e '.result.pass and .value >= 1' <<<"$upf" >/dev/null || fail "upf: $an upf-sessions objective failed: $upf"
+}
+
 # --- scenarios ---------------------------------------------------------------------------------
 step_baseline() {
   start_guard
@@ -483,7 +529,8 @@ step_happy() {
   n="$(mock_dispatches keptn-promote.yaml | wc -l)"
   (( n > before )) || fail "happy: promote task succeeded but the GitHub mock got no keptn-promote.yaml dispatch"
   mock_dispatches keptn-promote.yaml | tail -n 1 | sed 's/^/    mock: /'
-  result PASS "scenario 1 (happy path): RELEASE_ID $rid -> app version $av Succeeded (tasks, evaluation open5gs-kpis), promotion dispatched (keptn-promote.yaml)"
+  check_upf_kpis
+  result PASS "scenario 1 (happy path): RELEASE_ID $rid -> app version $av Succeeded (tasks, evaluation open5gs-kpis), promotion dispatched (keptn-promote.yaml); UPF sessions > 0, UPFNoUserPlaneTraffic not firing, open5gs-slo upf-sessions objective passed"
 }
 
 step_fault() {
