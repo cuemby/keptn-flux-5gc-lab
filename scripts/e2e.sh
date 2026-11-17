@@ -566,12 +566,14 @@ step_slo() {
   start_guard
   local age raw pdu upf amf
   log "Scenario 10 (SLO analysis) during the fault"
-  # The Analysis looks at the last 5m (args.window); wait until the faulty SMF has run that long,
-  # so no healthy sample from the previous release is in the window.
+  # Keptn 0.11's Prometheus provider runs a range query over the Analysis timeframe (recent 10m)
+  # and keeps only its first point, so the result describes the 5m window (args.window) that ended
+  # 10m before the Analysis started. Wait until the faulty SMF has run 10m + 5m (+ margin), so
+  # that window holds only the fault.
   age="$(deploy_age open5gs-smf)"
-  if (( age < 330 )); then
-    echo "  faulty SMF running for ${age}s; waiting $(( 330 - age ))s so the 5m window holds only the fault"
-    sleep $(( 330 - age ))
+  if (( age < 960 )); then
+    echo "  faulty SMF running for ${age}s; waiting $(( 960 - age ))s (Analysis timeframe 10m + window 5m)"
+    sleep $(( 960 - age ))
   fi
   raw="$(run_analysis "scenario 10")"
   pdu="$(objective "$raw" smf-pdu-success)"

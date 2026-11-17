@@ -18,7 +18,7 @@ spec:
   # requests, and traffic-pulse restarting the UEs aborts one or two (stale NG context), which
   # alone read 0.57-0.75 on the full profile and on Cilium. A real fault fails every retry.
   query: >-
-    (sum(increase(fivegs_amffunction_rm_reginitsucc[5m])) / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[5m])), 1))
+    ((sum(increase(fivegs_amffunction_rm_reginitsucc[5m])) or vector(0)) / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[5m])), 1))
     and on() (sum(increase(fivegs_amffunction_rm_reginitreq[5m])) - (sum(increase(fivegs_amffunction_rm_reginitsucc[5m])) or vector(0)) >= 3)
     or on() vector(1)
   fetchIntervalSeconds: 15
@@ -33,7 +33,7 @@ spec:
   # requests, and traffic-pulse restarting the UEs aborts one or two (stale NG context), which
   # alone read 0.57-0.75 on the full profile and on Cilium. A real fault fails every retry.
   query: >-
-    (sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m])) / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])), 1))
+    ((sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m])) or vector(0)) / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])), 1))
     and on() (sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])) - (sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m])) or vector(0)) >= 3)
     or on() vector(1)
   fetchIntervalSeconds: 15

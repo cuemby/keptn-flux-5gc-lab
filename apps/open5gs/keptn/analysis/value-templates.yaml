@@ -8,7 +8,7 @@ spec:
   # Read as 1 while fewer than 3 requests failed in the window (as kpi-guard's
   # minFailedRequests and the KeptnMetrics in ../metrics.yaml).
   query: >-
-    (sum(increase(fivegs_amffunction_rm_reginitsucc[{{.window}}])) / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[{{.window}}])), 1))
+    ((sum(increase(fivegs_amffunction_rm_reginitsucc[{{.window}}])) or vector(0)) / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[{{.window}}])), 1))
     and on() (sum(increase(fivegs_amffunction_rm_reginitreq[{{.window}}])) - (sum(increase(fivegs_amffunction_rm_reginitsucc[{{.window}}])) or vector(0)) >= 3)
     or on() vector(1)
 ---
@@ -20,7 +20,7 @@ spec:
   # Read as 1 while fewer than 3 requests failed in the window (as kpi-guard's
   # minFailedRequests and the KeptnMetrics in ../metrics.yaml).
   query: >-
-    (sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[{{.window}}])) / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[{{.window}}])), 1))
+    ((sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[{{.window}}])) or vector(0)) / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[{{.window}}])), 1))
     and on() (sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[{{.window}}])) - (sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[{{.window}}])) or vector(0)) >= 3)
     or on() vector(1)
 ---
