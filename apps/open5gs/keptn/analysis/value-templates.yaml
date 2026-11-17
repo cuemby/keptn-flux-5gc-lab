@@ -23,6 +23,8 @@ kind: AnalysisValueTemplate
 metadata: { name: upf-sessions, namespace: open5gs }
 spec:
   provider: { name: prometheus }
-  # PDU sessions the UPF held in the window. Not the N3 packet counter: Open5GS 2.8.0 exports
+  # Fewest PDU sessions the UPF held at any point in the window ("sessions held throughout the
+  # window"): the sum is taken per step first, so an old UPF pod's series from before a release
+  # cannot mask a new UPF with no sessions. Not the N3 packet counter: Open5GS 2.8.0 exports
   # fivegs_ep_n3_gtp_indatapktn3upf but never increments it.
-  query: "sum(max_over_time(fivegs_upffunction_upf_sessionnbr[{{.window}}]))"
+  query: "min_over_time(sum(fivegs_upffunction_upf_sessionnbr)[{{.window}}:])"

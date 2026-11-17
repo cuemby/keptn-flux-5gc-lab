@@ -1,6 +1,6 @@
 # Deno runtime (ghcr.io/keptn/deno-runtime, set by the Keptn lifecycle
-# operator). Soaks the release, watches registration, PDU and UPF session KPIs, and
-# requests a Git rollback (GitHub workflow_dispatch) after two consecutive
+# operator). Waits for registration traffic, soaks the release, watches registration, PDU and
+# UPF session KPIs, and requests a Git rollback (GitHub workflow_dispatch) after two consecutive
 # breaches. Keptn never rolls back by itself; Flux applies the rollback commit.
 apiVersion: lifecycle.keptn.sh/v1
 kind: KeptnTaskDefinition
@@ -9,7 +9,7 @@ metadata:
   namespace: open5gs
   annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
 spec:
-  timeout: 15m
+  timeout: 20m                                  # trafficWait + warmup + soak, plus query time
   retries: 0
   ttlSecondsAfterFinished: 600
   serviceAccount: { name: keptn-task-runner }
@@ -18,8 +18,14 @@ spec:
     parameters:
       map:
         prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
-        # The task starts as soon as the NFs are rolled, before the gNB, UEs and SMF-UPF association
-        # are back (about 2.5 minutes on Kind). Wait so the 2m windows only see the new release.
+        # Timing: (1) poll until the AMF sees registration requests in a 2m window, for at most
+        # trafficWaitSeconds. On the first release after a bootstrap UERANSIM does not exist yet
+        # (Flux installs it after Open5GS is Ready; traffic-burst waits up to 6m for it). No traffic
+        # by then exits 1 as "no traffic": the task fails, no breach is counted and no rollback is
+        # requested. (2) Once traffic is seen, warm up for warmupSeconds: traffic-burst's gNB and UE
+        # restarts and the SMF-UPF re-association (about 2.5 minutes on Kind) fall here, not in the
+        # soak, and the 2m windows then only see the new release. (3) Soak for soakSeconds.
+        trafficWaitSeconds: "480"
         warmupSeconds: "180"
         soakSeconds: "300"
         pollSeconds: "30"
@@ -69,8 +75,18 @@ spec:
         const PDUREQ = "sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m]))";
         const PDUOK = "sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[2m])) or vector(0)";
 
-        console.log(`warm-up: waiting ${data.warmupSeconds ?? 0}s for the new release's traffic`);
-        await new Promise((r) => setTimeout(r, Number(data.warmupSeconds ?? 0) * 1000));
+        const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
+        console.log(`waiting up to ${data.trafficWaitSeconds}s for registration traffic`);
+        const waitDeadline = Date.now() + Number(data.trafficWaitSeconds) * 1000;
+        while (!(await query(REQ) > 0)) {
+          if (Date.now() >= waitDeadline) {
+            console.error("kpi-guard: no registration traffic; check UERANSIM and traffic-pulse");
+            Deno.exit(1);
+          }
+          await sleep(Number(data.pollSeconds));
+        }
+        console.log(`warm-up: waiting ${data.warmupSeconds}s for the new release's traffic`);
+        await sleep(Number(data.warmupSeconds));
         let breaches = 0, samples = 0;
         const deadline = Date.now() + Number(data.soakSeconds) * 1000;
         while (Date.now() < deadline) {
@@ -99,7 +115,7 @@ spec:
           } else {
             console.log("no registration traffic in window, waiting");
           }
-          await new Promise((r) => setTimeout(r, Number(data.pollSeconds) * 1000));
+          await sleep(Number(data.pollSeconds));
         }
 
         if (samples === 0) {

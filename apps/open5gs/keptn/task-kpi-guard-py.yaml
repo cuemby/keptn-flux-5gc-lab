@@ -7,7 +7,7 @@ metadata:
   namespace: open5gs
   annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
 spec:
-  timeout: 15m
+  timeout: 20m                                  # trafficWait + warmup + soak, plus query time
   retries: 0
   ttlSecondsAfterFinished: 600
   serviceAccount: { name: keptn-task-runner }
@@ -16,8 +16,8 @@ spec:
     parameters:
       map:
         prometheusUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090"
-        # The task starts as soon as the NFs are rolled, before the gNB, UEs and SMF-UPF association
-        # are back (about 2.5 minutes on Kind). Wait so the 2m windows only see the new release.
+        # Wait for registration traffic, then warm up, then soak (see task-kpi-guard.yaml).
+        trafficWaitSeconds: "480"
         warmupSeconds: "180"
         soakSeconds: "300"
         pollSeconds: "30"
@@ -63,8 +63,14 @@ spec:
         PDUREQ = "sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m]))"
         PDUOK = "sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[2m])) or vector(0)"
 
-        print("warm-up: waiting {}s for the new release's traffic".format(data.get("warmupSeconds", "0")), flush=True)
-        time.sleep(int(data.get("warmupSeconds", "0")))
+        print("waiting up to {}s for registration traffic".format(data["trafficWaitSeconds"]), flush=True)
+        wait_deadline = time.time() + int(data["trafficWaitSeconds"])
+        while not query(REQ) > 0:
+            if time.time() >= wait_deadline:
+                raise SystemExit("kpi-guard-py: no registration traffic; check UERANSIM and traffic-pulse")
+            time.sleep(int(data["pollSeconds"]))
+        print("warm-up: waiting {}s for the new release's traffic".format(data["warmupSeconds"]), flush=True)
+        time.sleep(int(data["warmupSeconds"]))
         breaches, samples = 0, 0
         deadline = time.time() + int(data["soakSeconds"])
         while time.time() < deadline:
