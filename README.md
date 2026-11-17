@@ -63,7 +63,8 @@ available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused w
 check. Measured with `scripts/e2e.sh` on the light profile (whole lab with tracing, Open5GS,
 UERANSIM and the Keptn tasks running): the two Kind node containers peaked at about 3.9 GB, so
 6 GB free leaves room for image pulls and the host. The full profile has not been measured on a
-laptop; the nightly `kind-extended` e2e job runs it on a GitHub-hosted runner (4 vCPUs, 16 GB).
+laptop; the nightly `kind-extended` e2e job runs it on a GitHub-hosted runner (4 vCPUs, 16 GB),
+where its three Kind nodes peaked at about 5.7 GB (light with Cilium: about 6.2 GB).
 
 Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Both enforce the lab's
 NetworkPolicies (kindnet does since Kind v0.24); Cilium is needed for SCTP tests
