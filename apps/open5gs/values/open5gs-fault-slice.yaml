@@ -20,6 +20,9 @@ webui: { enabled: false }   # optional subscriber UI; populate below seeds the U
 
 mongodb:
   enabled: true
+  # The chart's mongo:8.0.34 exits on start on Linux kernels 6.19-7.0.13 (SERVER-121912;
+  # GitHub's ubuntu-latest runners use 7.0.0-azure). MongoDB 7.0 has no such kernel gate.
+  image: { tag: 7.0.48 }
   auth: { enabled: false }
   persistence: { enabled: true, size: 1Gi }
   resources:
