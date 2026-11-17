@@ -180,14 +180,16 @@ scripts/e2e.sh all   # Kind (light profile) + Flux + scenarios 1 and 2, then del
 `scripts/e2e.sh` needs no GitHub token. It copies the working tree into a scratch Git repository,
 pushes it as an OCI artifact to a local registry on the Kind network, and installs Flux with an
 `OCIRepository` named `flux-system` in place of the `GitRepository` that `flux bootstrap`
-creates. Scenario changes are made with the lab's own scripts (`bump-release.sh`,
-`inject-fault.sh`, `heal.sh` with `NO_PUSH=1`) and pushed as new artifacts. The Keptn tasks send
+creates. Scenario changes are made with the lab's own scripts (`bump-release.sh` and
+`inject-fault.sh` with `NO_PUSH=1`) and pushed as new artifacts. The Keptn tasks send
 their `workflow_dispatch` calls to a GitHub API mock in namespace `e2e` (the optional `api` key
 of the `github-dispatch` Secret), so a rollback or promotion is checked as *requested*; the
 `keptn-rollback` and `keptn-promote` workflows do not run. Steps can run one at a time
-(`up`, `flux`, `wait`, `baseline`, `happy`, `fault`, `heal`, `diag`, `down`); see the header of
-the script. It records host and Kind node memory every 15 s and stops (and deletes the cluster)
-when available memory falls below `E2E_MEM_FLOOR_MIB` (default 1024). A full run takes about
+(`up`, `flux`, `wait`, `baseline`, `happy`, `fault`, `diag`, `down`); see the header of
+the script. It records host and Kind node memory every 15 s and stops the run when available
+memory falls below `E2E_MEM_FLOOR_MIB` (default 1024); `scripts/e2e.sh all` (and the CI
+workflow's always-run `down` step) then deletes the cluster, while single steps leave it for
+`scripts/e2e.sh down`. A full run takes about
 35 minutes on a laptop-class host (about 15 of them until everything is Ready). The first Keptn
 app version after a fresh install is recorded but not asserted: its traffic task starts before
 UERANSIM is installed, so it fails and kpi-guard requests a rollback.

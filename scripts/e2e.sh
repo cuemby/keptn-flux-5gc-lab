@@ -7,8 +7,8 @@
 #     the Kind network. The generated clusters/lab/flux-system/gotk-sync.yaml declares an
 #     OCIRepository "flux-system" (instead of the GitRepository that flux bootstrap creates),
 #     and the sourceRefs of the Flux Kustomizations in the copy are switched to it.
-#   - Scenario changes are made with the lab's own scripts (bump-release.sh, inject-fault.sh,
-#     heal.sh with NO_PUSH=1) in the scratch repository, then pushed as a new artifact.
+#   - Scenario changes are made with the lab's own scripts (bump-release.sh and inject-fault.sh
+#     with NO_PUSH=1) in the scratch repository, then pushed as a new artifact.
 #   - The Keptn tasks call a GitHub API mock in namespace e2e (the optional "api" key of the
 #     github-dispatch Secret). The mock logs every workflow_dispatch and answers 204, so a
 #     rollback or promotion is asserted as "requested"; the GitHub workflows themselves do not run.
@@ -22,7 +22,6 @@
 #               promotion dispatched
 #   fault       scenario 2: faulty slice config; kpi-guard fails and requests a rollback,
 #               promotion skipped
-#   heal        restore the good config (what the rollback commit does); the next version passes
 #   diag [dir]  collect diagnostics (scripts/collect-diagnostics.sh)
 #   memory      print the memory summary
 #   down        delete the cluster and the registry
@@ -511,18 +510,6 @@ step_fault() {
   result PASS "scenario 2 (fault): RELEASE_ID $rid -> app version $av Failed; kpi-guard breach, rollback dispatch requested (keptn-rollback.yaml, source keptn); evaluation $ev; promotion skipped"
 }
 
-step_heal() {
-  start_guard
-  local rid av st
-  log "Heal: restore values/open5gs-good.yaml (the content a rollback commit restores)"
-  rid="$(release "e2e: heal" scripts/heal.sh lab)"
-  av="$(wait_appversion "$rid")" || fail "heal: app version for $rid did not finish within ${VERSION_TIMEOUT}s"
-  summarize "$av"
-  st="$(av_field "$av" '{.status.status}')"
-  [[ "$st" == Succeeded ]] || fail "heal: app version $av status=$st (want Succeeded)"
-  result PASS "heal: RELEASE_ID $rid -> app version $av Succeeded after restoring the good config"
-}
-
 step_diag() {
   "$REPO_ROOT/scripts/collect-diagnostics.sh" "${1:-${E2E_DIAG_DIR:-$E2E_DIR/diagnostics}}"
   cp "$E2E_DIR/memory.log" "$E2E_DIR/results.md" "${1:-${E2E_DIAG_DIR:-$E2E_DIR/diagnostics}}/" 2>/dev/null || true
@@ -560,7 +547,7 @@ mkdir -p "$E2E_DIR"
 trap 'stop_guard' EXIT
 while (( $# )); do
   case "$1" in
-    up | flux | wait | baseline | happy | fault | heal | down | memory | all) "step_$1" ;;
+    up | flux | wait | baseline | happy | fault | down | memory | all) "step_$1" ;;
     diag) step_diag "${2:-}"; [[ $# -gt 1 ]] && shift ;;
     *) die "unknown step: $1" ;;
   esac

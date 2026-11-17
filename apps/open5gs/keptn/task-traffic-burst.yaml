@@ -8,7 +8,7 @@ metadata:
   namespace: open5gs
   annotations: { kustomize.toolkit.fluxcd.io/substitute: disabled }
 spec:
-  timeout: 5m
+  timeout: 10m
   retries: 0
   ttlSecondsAfterFinished: 600
   serviceAccount: { name: keptn-traffic }       # defined in traffic/traffic-pulse.yaml
