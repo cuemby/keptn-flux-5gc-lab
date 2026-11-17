@@ -50,24 +50,24 @@ Notes for the use-case text:
   `fivegs_upffunction_upf_sessionnbr` as its user-plane KPI. See
   [observability.md](observability.md#open5gs-kpis).
 
-## Open question for the Mavenir sandbox
+## Open question for the hackathon sandbox
 
 Keptn objects (app context, task definitions, evaluations) normally live in the workload's
-namespace, and the Mavenir `mvnr-*` namespaces are closed to participants. Decide one of these
+namespace, and the hackathon sandbox's 5G core namespaces are closed to participants. Decide one of these
 before the hackathon:
 
 - Keep the Keptn objects in a namespace participants can write to, and check what Keptn allows
   in [Allocating namespaces for Keptn resources](https://keptn.sh/stable/docs/installation/configuration/namespace-resources/).
 - The 5GC operator applies the participants' Keptn objects through Git.
-- Mavenir grants write access to the Keptn CRDs only in its namespaces. The `lab-keptn-author`
+- The 5G core vendor grants write access to the Keptn CRDs only in its namespaces. The `lab-keptn-author`
   role in [security.md](security.md#personas) is exactly that scope.
 
-Moving the lab to the Mavenir sandbox means changing:
+Moving the lab to the hackathon sandbox means changing:
 
 - the post-renderer targets in `apps/open5gs/helmrelease-open5gs.yaml` (or the operator adds the
   `keptn.sh/*` labels and annotations),
 - the PromQL in the KeptnMetrics, the AnalysisValueTemplates, `kpi-guard` and the alert rules,
-- the traffic task, which triggers the Spirent traffic generator instead of UERANSIM,
+- the traffic task, which triggers the sandbox's commercial traffic generator instead of UERANSIM,
 - the Git repository Flux watches.
 
 The README section [Swapping the 5G core](../README.md#8-swapping-the-5g-core) lists the files.

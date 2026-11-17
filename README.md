@@ -175,7 +175,7 @@ through stdin). Then change:
 ## 8. Swapping the 5G core
 
 Keptn only needs the pod template labels and annotations, a traffic generator and KPIs in
-Prometheus. To use another 5G core (or the Mavenir sandbox), change:
+Prometheus. To use another 5G core (for example a commercial one in the hackathon sandbox), change:
 
 | What | File |
 |---|---|

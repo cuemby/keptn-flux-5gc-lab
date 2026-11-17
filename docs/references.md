@@ -24,7 +24,7 @@ Every link was checked on 2026-11-17.
 - [Multi-stage application delivery](https://keptn.sh/stable/docs/guides/multi-stage-application-delivery/) (promotion tasks through GitHub workflows)
 - [OpenTelemetry observability](https://keptn.sh/stable/docs/guides/otel/), [DORA metrics](https://keptn.sh/stable/docs/guides/dora/) and [Redeploy/restart an application](https://keptn.sh/stable/docs/guides/restart-application-deployment/)
 - [Use case: Keptn + Flux](https://keptn.sh/stable/docs/use-cases/flux/)
-- [Allocating namespaces for Keptn resources](https://keptn.sh/stable/docs/installation/configuration/namespace-resources/) and [Restricting monitored namespaces](https://keptn.sh/stable/docs/installation/configuration/namespace-keptn/) (relevant to the Mavenir sandbox question in [learning-goals.md](learning-goals.md#open-question-for-the-mavenir-sandbox))
+- [Allocating namespaces for Keptn resources](https://keptn.sh/stable/docs/installation/configuration/namespace-resources/) and [Restricting monitored namespaces](https://keptn.sh/stable/docs/installation/configuration/namespace-keptn/) (relevant to the sandbox question in [learning-goals.md](learning-goals.md#open-question-for-the-hackathon-sandbox))
 - [PodTatoHead delivery example with Keptn](https://github.com/podtato-head/podtato-head/blob/main/delivery/keptn/README.md)
 
 ## Deno and Python runtimes

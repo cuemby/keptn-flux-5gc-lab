@@ -1,6 +1,6 @@
 # Architecture
 
-The lab mirrors the loop of the Mavenir hackathon sandbox: Prometheus, then Keptn, then Git,
+The lab mirrors the loop of the hackathon sandbox, which runs a commercial 5G core: Prometheus, then Keptn, then Git,
 then Flux. Every change, including a rollback, is a Git commit that Flux applies. Keptn and
 Alertmanager never call Flux or the cluster directly; they ask GitHub Actions to write a commit.
 
