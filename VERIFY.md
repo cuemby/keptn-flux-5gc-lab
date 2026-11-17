@@ -257,9 +257,9 @@ Each entry: what the blueprint said, what is actually true, what the lab does.
 
 ### Documentation
 
-- **`make bump` commits and pushes** (Makefile help text). `scripts/bump-release.sh` only writes
-  the new `RELEASE_ID`; commit and push it yourself. `make fault` and `make heal` do commit and
-  push.
+- **`make bump` commits and pushes.** The Makefile help text claimed this, but
+  `scripts/bump-release.sh` only writes the new `RELEASE_ID`; commit and push it yourself. The help
+  text was corrected. `make fault` and `make heal` do commit and push.
 - **Reference list.** The hackathon list's PodTatoHead and metrics-operator links were wrong
   (replaced). The ControlPlane Flux overview moved to `/blog/`. The keptn.sh guides named only by
   their navigation title now have direct links. All links were checked on 2026-11-17.
