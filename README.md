@@ -269,6 +269,11 @@ pushing), bootstraps the light profile against it with `scripts/bootstrap.sh`, t
 - loop-guard (scenario 3): the good config is made bad too and a fault is released; one rollback,
   then `keptn-rollback.yaml` stops in "Needs a human".
 
+Each scenario first waits until the previous one's rollback alerts have cleared. A short fault keeps
+`Open5GSDegradedAfterRelease` true for about 15 minutes after Keptn has already rolled it back, so
+`keptn-rollback.yaml` ignores an Alertmanager request when the last release commit is younger than
+15 minutes: that degradation began before the release.
+
 It refuses to start while any Kind cluster exists or with less than 6 GB available, stops below
 1 GB, and on exit deletes the cluster, puts the starting lab tree back on `main`, and deletes the
 Flux deploy key and the credentials file, whatever the outcome. Tokens never reach process arguments or output. A run lasts a few hours (several
