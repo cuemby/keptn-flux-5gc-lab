@@ -62,7 +62,9 @@ action?" to "what would it take to integrate Keptn into a real delivery pipeline
 available (override with `SKIP_MEMORY_CHECK=1`); an existing cluster is reused without the
 check. Measured with `scripts/e2e.sh` on the light profile (whole lab with tracing, Open5GS,
 UERANSIM and the Keptn tasks running): the two Kind node containers peaked at about 3.9 GB, so
-6 GB free leaves room for image pulls and the host. The full profile has not been measured.
+6 GB free leaves room for image pulls and the host. The full profile has not been measured on a
+laptop; the nightly `kind-extended` e2e job runs it on a GitHub-hosted runner (4 vCPUs, 16 GB),
+where its three Kind nodes peaked at about 5.7 GB (light with Cilium: about 6.2 GB).
 
 Select a profile and CNI with `PROFILE=light|full` and `CNI=kindnet|cilium`. Both enforce the lab's
 NetworkPolicies (kindnet does since Kind v0.24); Cilium is needed for SCTP tests
@@ -113,6 +115,12 @@ to mission control, SLO analysis and the Python task runtime. See `docs/scenario
 `lab:viewers`, `lab:keptn-authors`, `lab:5gc-operators` and `lab:platform-admins`, with
 `scripts/add-user.sh <name> <group>` issuing 7-day client certificates. See `docs/security.md`
 *(to be completed)*.
+
+`scripts/rbac-check.sh` runs the check matrix (scenario 6): `kubectl auth can-i` for each persona
+group and for the workload identities (`keptn-traffic`, `keptn-task-runner`, `alert-relay`,
+`flux-apps`), compared with the expected answers. `scripts/rbac-check.sh add-user` also issues a
+real certificate for a test user in `lab:keptn-authors` with `add-user.sh`, checks it with
+`kubectl auth whoami`, `can-i` and real requests, and deletes the test user's key and kubeconfig.
 
 ## 7. Other clusters
 
@@ -174,7 +182,8 @@ the Open5GS release inputs (`apps/open5gs/values/`, `apps/open5gs/helmrelease-*.
 ### End-to-end test
 
 ```bash
-scripts/e2e.sh all   # Kind (light profile) + Flux + scenarios 1 and 2, then deletes the cluster
+scripts/e2e.sh all   # Kind (light profile) + Flux + scenarios 1, 2, 6, 10 and 11, then deletes the cluster
+CNI=cilium scripts/e2e.sh all   # the same on Cilium, plus scenario 7 (NetworkPolicies, SCTP)
 ```
 
 `scripts/e2e.sh` needs no GitHub token. It copies the working tree into a scratch Git repository,
@@ -185,22 +194,91 @@ creates. Scenario changes are made with the lab's own scripts (`bump-release.sh`
 their `workflow_dispatch` calls to a GitHub API mock in namespace `e2e` (the optional `api` key
 of the `github-dispatch` Secret), so a rollback or promotion is checked as *requested*; the
 `keptn-rollback` and `keptn-promote` workflows do not run. Steps can run one at a time
-(`up`, `flux`, `wait`, `baseline`, `happy`, `fault`, `diag`, `down`); see the header of
-the script. It records host and Kind node memory every 15 s and stops the run when available
-memory falls below `E2E_MEM_FLOOR_MIB` (default 1024); `scripts/e2e.sh all` (and the CI
-workflow's always-run `down` step) then deletes the cluster, while single steps leave it for
-`scripts/e2e.sh down`. A full run takes about
-35 minutes on a laptop-class host (about 15 of them until everything is Ready). The first Keptn
+(`up`, `flux`, `wait`, `baseline`, `rbac`, `netpol`, `happy`, `fault`, `slo`, `python`, `diag`,
+`down`); see the header of the script. `PROFILE=full` uses the three-node cluster and
+`CNI=cilium` installs Cilium with SCTP enabled, as `scripts/bootstrap.sh` does. It records host
+and Kind node memory every 15 s and stops the run when available memory falls below
+`E2E_MEM_FLOOR_MIB` (default 1024); `scripts/e2e.sh all` (and the CI workflow's always-run `down`
+step) then deletes the cluster, while single steps leave it for `scripts/e2e.sh down`. Up to the
+fault (scenario 2), a run took about 35 minutes on a laptop-class host (about 15 of them until
+everything is Ready); the scenario 11 step adds two more releases. The first Keptn
 app version after a fresh install must succeed too: its traffic task waits for UERANSIM, which
 Flux installs only after Open5GS is Ready, and `kpi-guard` starts its warm-up and soak only once
 UERANSIM's registration traffic reaches the AMF. After the happy path it also checks the UPF KPIs:
 PDU sessions on the UPF, the `UPFNoUserPlaneTraffic` alert not firing, and a one-shot
-`open5gs-slo` Analysis (`examples/analysis-run.yaml`) passing its `upf-sessions` objective.
+`open5gs-slo` Analysis (`examples/analysis-run.yaml`) passing, overall and on its `upf-sessions`
+objective.
 
-The `e2e` workflow runs the same steps on every pull request on a GitHub-hosted runner and uploads
-diagnostics (`scripts/collect-diagnostics.sh`) when a step fails. Not covered there: the GitHub
-side of a rollback or promotion (needs the dispatch token), scenario 9 (alert-relay, 15 minutes
-of degradation), Cilium and SCTP (scenario 7), and the RBAC matrix (scenario 6).
+Scenarios beyond the happy path and the fault:
+
+- 6 (`rbac`): `scripts/rbac-check.sh`, the persona and workload-identity matrix plus a real
+  `add-user.sh` certificate.
+- 7 (`netpol`): from namespace `default`, the AMF metrics port, the alert relay and Prometheus are
+  blocked; from `open5gs` the AMF and Prometheus answer; Alertmanager reaches the alert relay (a
+  request from an ephemeral container in the Alertmanager pod); Prometheus targets in `open5gs` are
+  up and the KeptnMetrics update. With `CNI=cilium` it also checks SCTP: Cilium's `enable-sctp`, the
+  AMF's NGAP Service on SCTP/38412 and registered UEs, which need NG Setup over that association.
+  `all` runs it only with Cilium.
+- 10 (`happy`, then `slo` after the fault): the `open5gs-slo` Analysis passes on the healthy lab
+  and fails during the fault, with the `smf-pdu-success` and `upf-sessions` objectives failing.
+- 11 (`python`): `kpi-guard` is swapped for `kpi-guard-py` in the app context together with
+  `heal.sh`; that release passes under `kpi-guard-py`, then `inject-fault.sh` repeats scenario 2
+  and `kpi-guard-py` requests the rollback.
+
+The `e2e` workflow runs these steps on every pull request on a GitHub-hosted runner (light
+profile, kindnet) and uploads diagnostics (`scripts/collect-diagnostics.sh`)
+when a step fails. Its `kind-extended` job runs nightly and on `workflow_dispatch` (input
+`variant`: `full`, `cilium` or `all`): the full profile with kindnet, and the light profile with
+Cilium, where scenario 7 runs too.
+
+### Live check against GitHub
+
+The GitHub side of a rollback or promotion, the loop guard (scenario 3) and mission control
+(scenario 9) need a real repository and the two tokens. `scripts/live-github-check.sh` runs them
+end to end against a throwaway repository (default `cuemby/keptn-flux-5gc-lab-sandbox`; only names
+ending in `-sandbox` unless `LIVE_ALLOW_ANY_REPO=1`).
+
+The easiest way is to run it on a GitHub-hosted runner inside the sandbox itself, with
+`.github/workflows/live-github-check.yaml` (workflow_dispatch; it does nothing in other repositories):
+
+1. Copy the lab tree to the sandbox's `main`, workflows included, without `e2e.yaml` and
+   `validate.yaml`. Use your own credentials: the bootstrap token cannot change workflow files.
+2. Add the tokens to the sandbox only, without echoing them:
+   `gh secret set LIVE_BOOTSTRAP_TOKEN -R <owner>/<repo>-sandbox` (Administration and Contents
+   write) and `gh secret set LIVE_DISPATCH_TOKEN -R <owner>/<repo>-sandbox` (Actions write); each
+   reads the value from stdin.
+3. `gh workflow run live-github-check.yaml -R <owner>/<repo>-sandbox`. The job summary and the
+   `live-github-check` artifact hold the results (and diagnostics on failure).
+
+Or run it from a checkout, on a host with at least 6 GB available:
+
+```bash
+scripts/live-github-check.sh --creds ./creds.env [owner/repo]   # GITHUB_TOKEN, KEPTN_DISPATCH_TOKEN
+```
+
+It pushes the lab tree of the current `HEAD` commit to the repository's `main` (without the e2e
+and validate workflows; the repository's `.github` must already match, or it stops before
+pushing), bootstraps the light profile against it with `scripts/bootstrap.sh`, then:
+
+- promote: the first release passes and `keptn-promote.yaml` runs on GitHub;
+- rollback (scenario 2): a faulty release; `kpi-guard` dispatches `keptn-rollback.yaml`, its
+  rollback commit lands, Flux applies it and the next release passes;
+- mission (scenario 9): a release with a config change passes, the UDM is scaled to 0 with
+  `kubectl`; after 15 minutes `Open5GSDegradedAfterRelease` fires, `alert-relay` dispatches the
+  rollback, Flux applies it and the UDM's replicas are restored;
+- loop-guard (scenario 3): the good config is made bad too and a fault is released; one rollback,
+  then `keptn-rollback.yaml` stops in "Needs a human".
+
+Each scenario first waits until the previous one's rollback alerts have cleared. A short fault keeps
+`Open5GSDegradedAfterRelease` true for about 15 minutes after Keptn has already rolled it back, so
+`keptn-rollback.yaml` ignores an Alertmanager request when the last release commit is younger than
+15 minutes: that degradation began before the release.
+
+It refuses to start while any Kind cluster exists or with less than 6 GB available, stops below
+1 GB, and on exit deletes the cluster, puts the starting lab tree back on `main`, and deletes the
+Flux deploy key and the credentials file, whatever the outcome. Tokens never reach process arguments or output. A run lasts a few hours (several
+releases and a 15-minute degradation); results and workflow run URLs are written to
+`$LIVE_DIR/results.md`.
 
 ## 12. References
 

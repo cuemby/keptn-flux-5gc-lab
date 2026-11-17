@@ -11,28 +11,43 @@
 #     with NO_PUSH=1) in the scratch repository, then pushed as a new artifact.
 #   - The Keptn tasks call a GitHub API mock in namespace e2e (the optional "api" key of the
 #     github-dispatch Secret). The mock logs every workflow_dispatch and answers 204, so a
-#     rollback or promotion is asserted as "requested"; the GitHub workflows themselves do not run.
+#     rollback or promotion is asserted as "requested"; the GitHub workflows themselves do not run
+#     (scripts/live-github-check.sh runs them against a real repository).
 #
 # Usage: scripts/e2e.sh <step>...
-#   up          create the Kind cluster "kfl-e2e" (light profile) and the local registry
+#   up          create the Kind cluster "kfl-e2e" (PROFILE, CNI) and the local registry; with
+#               CNI=cilium, install Cilium (SCTP enabled) as scripts/bootstrap.sh does
 #   flux        install Flux, push the tree, create the Secrets and the GitHub mock
 #   wait        wait until every Flux Kustomization and HelmRelease is Ready
 #   baseline    the first Keptn app version after the install succeeds (no rollback requested)
 #               and Keptn manages only the four NFs (amf, smf, nssf, upf)
+#   rbac        scenario 6: the RBAC check matrix and a real add-user.sh certificate
+#               (scripts/rbac-check.sh)
+#   netpol      scenario 7: NetworkPolicies deny the AMF metrics port, the alert relay and
+#               Prometheus from namespace default, while Prometheus scrapes, Keptn metric queries
+#               and Alertmanager -> alert-relay still work; with CNI=cilium also SCTP (Cilium
+#               enable-sctp, NGAP over SCTP with registered UEs)
 #   happy       scenario 1: bump RELEASE_ID; the app version succeeds, evaluation passes,
 #               promotion dispatched; the UPF holds PDU sessions, UPFNoUserPlaneTraffic is not
-#               firing and an open5gs-slo Analysis passes its upf-sessions objective
+#               firing; scenario 10: an open5gs-slo Analysis passes (overall and upf-sessions)
 #   fault       scenario 2: faulty config (SMF DNN mismatch); kpi-guard fails and requests a
 #               rollback, promotion skipped
+#   slo         scenario 10, second half: an open5gs-slo Analysis during the fault fails, with the
+#               smf-pdu-success and upf-sessions objectives failing (run after fault)
+#   python      scenario 11: swap kpi-guard for kpi-guard-py and restore the good config (the
+#               release passes under kpi-guard-py), then repeat scenario 2 (kpi-guard-py fails and
+#               requests a rollback, promotion skipped)
 #   diag [dir]  collect diagnostics (scripts/collect-diagnostics.sh)
 #   memory      print the memory summary
 #   down        delete the cluster and the registry
-#   all         up flux wait baseline happy fault, then down (diagnostics on failure)
+#   all         up flux wait baseline rbac [netpol] happy fault slo python, then down (diagnostics
+#               on failure); netpol runs when CNI=cilium
 #
 # Environment:
 #   E2E_DIR             state directory (default ${TMPDIR:-/tmp}/kfl-e2e): scratch repo,
 #                       kubeconfig, memory log, results
 #   PROFILE             light (default) or full
+#   CNI                 kindnet (default) or cilium (kind/cluster*-cilium.yaml + Cilium with SCTP)
 #   REGISTRY_PORT       host port of the local registry (default 5001)
 #   E2E_MIN_AVAIL_MIB   do not create the cluster below this much available memory (default 6144,
 #                       the light-profile figure from scripts/bootstrap.sh); Linux only
@@ -48,6 +63,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 E2E_DIR="${E2E_DIR:-${TMPDIR:-/tmp}/kfl-e2e}"
 SRC="$E2E_DIR/src"
 PROFILE="${PROFILE:-light}"
+CNI="${CNI:-kindnet}"
 CLUSTER="kfl-e2e"
 REGISTRY_NAME="kfl-e2e-registry"
 REGISTRY_PORT="${REGISTRY_PORT:-5001}"
@@ -132,9 +148,12 @@ step_up() {
   if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
     die "Kind cluster $CLUSTER already exists; run 'scripts/e2e.sh down' first"
   fi
-  local config=kind/cluster.yaml
-  [[ "$PROFILE" == full ]] && config=kind/cluster-full.yaml
   [[ "$PROFILE" == light || "$PROFILE" == full ]] || die "PROFILE must be light or full"
+  [[ "$CNI" == kindnet || "$CNI" == cilium ]] || die "CNI must be kindnet or cilium"
+  local config=kind/cluster
+  [[ "$PROFILE" == full ]] && config=kind/cluster-full
+  [[ "$CNI" == cilium ]] && { config+=-cilium; command -v helm >/dev/null 2>&1 || die "missing tool: helm (CNI=cilium)"; }
+  config+=.yaml
   if [[ -r /proc/meminfo ]]; then
     local a; a="$(avail_mib)"
     (( a >= E2E_MIN_AVAIL_MIB )) || die "only ${a} MiB available, E2E_MIN_AVAIL_MIB=${E2E_MIN_AVAIL_MIB}"
@@ -144,12 +163,32 @@ step_up() {
   : >"$E2E_DIR/results.md"
 
   log "Creating Kind cluster $CLUSTER from $config"
-  kind create cluster --name "$CLUSTER" --config "$REPO_ROOT/$config" --kubeconfig "$KUBECONFIG" --wait 120s
-  start_guard
+  if [[ "$CNI" == cilium ]]; then
+    # No CNI yet: the nodes only turn Ready once Cilium runs, so do not wait for them here.
+    kind create cluster --name "$CLUSTER" --config "$REPO_ROOT/$config" --kubeconfig "$KUBECONFIG"
+    start_guard
+    install_cilium
+  else
+    kind create cluster --name "$CLUSTER" --config "$REPO_ROOT/$config" --kubeconfig "$KUBECONFIG" --wait 120s
+    start_guard
+  fi
 
   log "Starting local registry $REGISTRY_NAME on 127.0.0.1:$REGISTRY_PORT"
   docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1 || true
   docker run -d --name "$REGISTRY_NAME" --network kind -p "127.0.0.1:$REGISTRY_PORT:5000" "$REGISTRY_IMAGE" >/dev/null
+}
+
+# install_cilium: the same chart, version and settings as scripts/bootstrap.sh (CNI=cilium).
+install_cilium() {
+  local version
+  version="$(sed -nE 's/^CILIUM_VERSION="([^"]+)".*/\1/p' "$REPO_ROOT/scripts/bootstrap.sh")"
+  [[ -n "$version" ]] || die "no CILIUM_VERSION in scripts/bootstrap.sh"
+  log "Installing Cilium $version (SCTP enabled)"
+  helm upgrade --install cilium cilium --repo https://helm.cilium.io --version "$version" \
+    --namespace kube-system --set sctp.enabled=true --set ipam.mode=kubernetes --wait --timeout 10m
+  kubectl -n kube-system rollout status ds/cilium --timeout=5m
+  kubectl wait --for=condition=Ready node --all --timeout=5m
+  result PASS "Cilium $version installed (sctp.enabled=true); all nodes Ready"
 }
 
 registry_ip() {
@@ -344,89 +383,17 @@ step_wait() {
 }
 
 # --- Keptn helpers ----------------------------------------------------------------------------
+# appversion_for, av_field, wait_appversion, task_for, wait_task, task_logs, evaluations_of,
+# summarize and prom_api.
+# shellcheck source=scripts/keptn-helpers.sh
+source "$REPO_ROOT/scripts/keptn-helpers.sh"
+
 release_id() { sed -nE 's/^[[:space:]]*RELEASE_ID:[[:space:]]*"([^"]+)".*/\1/p' "$SRC/clusters/lab/apps.yaml"; }
-
-# appversion_for <release-id>: newest KeptnAppVersion of app open5gs in which the four tracked
-# NFs (amf, smf, nssf, upf) carry that version.
-appversion_for() {
-  kubectl -n "$NS" get keptnappversions.lifecycle.keptn.sh -o json | jq -r --arg v "$1" '
-    [.items[] | select(.spec.appName == "open5gs")
-      | select([.spec.workloads[]? | select(.version == $v) | .name] as $n
-               | ["amf", "smf", "nssf", "upf"] | all(. as $w | $n | index($w)))]
-    | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty'
-}
-
-av_field() { kubectl -n "$NS" get keptnappversions.lifecycle.keptn.sh "$1" -o jsonpath="$2"; }
-
-# wait_appversion <release-id>: wait for the app version to exist and to leave Pending/Progressing
-# (promotion included); prints its name.
-wait_appversion() {
-  local rid=$1 deadline=$(( SECONDS + VERSION_TIMEOUT )) av="" st prom now last=""
-  while (( SECONDS < deadline )); do
-    [[ -z "$av" ]] && av="$(appversion_for "$rid")"
-    if [[ -n "$av" ]]; then
-      st="$(av_field "$av" '{.status.status}')"
-      prom="$(av_field "$av" '{.status.promotionStatus}')"
-      now="$st/$(av_field "$av" '{.status.currentPhase}')/post=$(av_field "$av" '{.status.postDeploymentStatus}')/eval=$(av_field "$av" '{.status.postDeploymentEvaluationStatus}')/promotion=$prom"
-      [[ "$now" != "$last" ]] && { echo "  $av: $now" >&2; last="$now"; }
-      case "$st" in
-        Succeeded) [[ "$prom" == Pending || "$prom" == Progressing || -z "$prom" ]] || { echo "$av"; return 0; } ;;
-        Failed | Deprecated | Warning | Cancelled) echo "$av"; return 0 ;;
-      esac
-    fi
-    sleep 15
-  done
-  echo "$av"
-  return 1
-}
-
-# task_for <app-version> <task-definition>: newest KeptnTask of that definition owned by the app version.
-task_for() {
-  kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh -o json | jq -r --arg av "$1" --arg td "$2" '
-    [.items[] | select(.spec.taskDefinition == $td and any(.metadata.ownerReferences[]?; .name == $av))]
-    | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty'
-}
-
-wait_task() { # wait_task <task> [timeout-seconds]: wait for a KeptnTask to finish; prints its status
-  local deadline=$(( SECONDS + ${2:-1200} )) st=""
-  while (( SECONDS < deadline )); do
-    st="$(kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh "$1" -o jsonpath='{.status.status}')"
-    [[ "$st" == Succeeded || "$st" == Failed ]] && break
-    sleep 10
-  done
-  echo "$st"
-}
-
-task_logs() { # task_logs <task>: logs of the pods of the Job behind a KeptnTask
-  local job pod
-  job="$(kubectl -n "$NS" get keptntasks.lifecycle.keptn.sh "$1" -o jsonpath='{.status.jobName}')"
-  [[ -n "$job" ]] || return 0
-  for pod in $(kubectl -n "$NS" get pods -l "job-name=$job" -o name 2>/dev/null); do
-    # The Job restarts a failed container in place; the first run's output is in --previous.
-    kubectl -n "$NS" logs "$pod" --all-containers --previous --tail=200 2>/dev/null || true
-    kubectl -n "$NS" logs "$pod" --all-containers --tail=200 2>/dev/null || true
-  done
-}
 
 # mock_dispatches <workflow>: workflow_dispatch requests the GitHub mock has received, one JSON per line.
 mock_dispatches() {
   kubectl -n e2e logs deploy/github-mock --tail=-1 2>/dev/null |
     jq -Rc --arg wf "$1" 'fromjson? | select(.workflow == $wf and .method == "POST")'
-}
-
-evaluations_of() { # evaluations_of <app-version>: "<name> <overallStatus>" per KeptnEvaluation it owns
-  kubectl -n "$NS" get keptnevaluations.lifecycle.keptn.sh -o json | jq -r --arg av "$1" '
-    .items[] | select(any(.metadata.ownerReferences[]?; .name == $av))
-    | "\(.metadata.name) \(.status.overallStatus // "none")"'
-}
-
-summarize() { # summarize <app-version>: status line and per-task results
-  local av=$1
-  echo "  app version $av: status=$(av_field "$av" '{.status.status}') post=$(av_field "$av" '{.status.postDeploymentStatus}') evaluation=$(av_field "$av" '{.status.postDeploymentEvaluationStatus}') promotion=$(av_field "$av" '{.status.promotionStatus}')"
-  kubectl -n "$NS" get keptnappversions.lifecycle.keptn.sh "$av" -o json | jq -r '
-    [.status.postDeploymentTaskStatus[]?, .status.postDeploymentEvaluationTaskStatus[]?, .status.promotionTaskStatus[]?]
-    | .[] | "    \(.definitionName): \(.status) (\(.name))"'
-  evaluations_of "$av" | sed 's/^/    evaluation /'
 }
 
 # release <message> <command...>: run a lab script in the scratch repo, push, reconcile; prints RELEASE_ID.
@@ -438,27 +405,33 @@ release() {
   release_id
 }
 
-# prom_api <path>: GET from the Prometheus HTTP API through a short-lived port-forward to the
-# Prometheus pod. The Prometheus image ships no wget/curl, and a port-forward reaches the pod's
-# localhost, so the observability NetworkPolicies do not apply.
-prom_api() {
-  local pod pf rc=0
-  pod="$(kubectl -n observability get pods -l app.kubernetes.io/name=prometheus -o name | head -n 1)"
-  [[ -n "$pod" ]] || return 1
-  kubectl -n observability port-forward --address 127.0.0.1 "$pod" 19090:9090 >/dev/null 2>&1 &
-  pf=$!
-  curl -fsS --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:19090$1" || rc=$?
-  kill "$pf" 2>/dev/null || true
-  wait "$pf" 2>/dev/null || true
-  return "$rc"
+# run_analysis <label>: create a one-shot open5gs-slo Analysis (examples/analysis-run.yaml), wait
+# for it to complete, print the overall and per-objective results (stderr) and print its
+# status.raw JSON (stdout). On failure it records a FAIL line and exits.
+run_analysis() {
+  local an deadline state raw
+  an="$(kubectl create -f "$REPO_ROOT/examples/analysis-run.yaml" -o name)" || fail "$1: could not create the open5gs-slo Analysis"
+  deadline=$(( SECONDS + 300 ))
+  until state="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.state}')"; [[ "$state" == Completed ]]; do
+    (( SECONDS < deadline )) || fail "$1: $an not Completed after 300s (state ${state:-none})"
+    sleep 10
+  done
+  raw="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.raw}')"
+  jq -r '.objectiveResults[] | "    analysis \(.objective.analysisValueTemplateRef.name): value=\(.value) pass=\(.result.pass) warning=\(.result.warning) score=\(.score)"' <<<"$raw" >&2
+  echo "    analysis ${an#*/}: pass=$(jq -r .pass <<<"$raw") warning=$(jq -r .warning <<<"$raw") score=$(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw")" >&2
+  printf '%s\n' "$raw"
 }
+
+# objective <raw> <template>: the objective result for one AnalysisValueTemplate, or empty.
+objective() { jq -c --arg t "$2" '[.objectiveResults[] | select(.objective.analysisValueTemplateRef.name == $t)][0] // empty' <<<"$1"; }
 
 # check_upf_kpis: the UPF user-plane KPIs read UPF PDU sessions (fivegs_upffunction_upf_sessionnbr),
 # not the N3 GTP-U counter Open5GS 2.8.0 never increments. On a healthy lab: the UPF holds
 # sessions, UPFNoUserPlaneTraffic is loaded on that metric and not firing, and a one-shot
-# open5gs-slo Analysis (examples/analysis-run.yaml) passes its upf-sessions objective.
+# open5gs-slo Analysis (examples/analysis-run.yaml) passes, overall (scenario 10) and on its
+# upf-sessions objective.
 check_upf_kpis() {
-  local q sessions rule an deadline state raw upf
+  local q sessions rule raw upf
   q="$(jq -rn '"sum(fivegs_upffunction_upf_sessionnbr)" | @uri')"
   sessions="$(prom_api "/api/v1/query?query=$q" | jq -r '.data.result[0].value[1] // "none"')" ||
     fail "upf: Prometheus query failed"
@@ -475,18 +448,13 @@ check_upf_kpis() {
   jq -e '.health == "ok" and .state != "firing"' <<<"$rule" >/dev/null ||
     fail "upf: UPFNoUserPlaneTraffic is $(jq -r '"\(.state)/\(.health)"' <<<"$rule") on a healthy lab (want not firing, health ok)"
 
-  an="$(kubectl create -f "$REPO_ROOT/examples/analysis-run.yaml" -o name)" || fail "upf: could not create the open5gs-slo Analysis"
-  deadline=$(( SECONDS + 300 ))
-  until state="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.state}')"; [[ "$state" == Completed ]]; do
-    (( SECONDS < deadline )) || fail "upf: $an not Completed after 300s (state ${state:-none})"
-    sleep 10
-  done
-  raw="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.raw}')"
-  jq -r '.objectiveResults[] | "    analysis \(.objective.analysisValueTemplateRef.name): value=\(.value) pass=\(.result.pass)"' <<<"$raw"
-  echo "    analysis ${an#*/}: pass=$(jq -r .pass <<<"$raw") warning=$(jq -r .warning <<<"$raw") score=$(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw")"
-  upf="$(jq -c '[.objectiveResults[] | select(.objective.analysisValueTemplateRef.name == "upf-sessions")][0] // empty' <<<"$raw")"
-  [[ -n "$upf" ]] || fail "upf: $an has no upf-sessions objective"
-  jq -e '.result.pass and .value >= 1' <<<"$upf" >/dev/null || fail "upf: $an upf-sessions objective failed: $upf"
+  raw="$(run_analysis upf)"
+  upf="$(objective "$raw" upf-sessions)"
+  [[ -n "$upf" ]] || fail "upf: the open5gs-slo Analysis has no upf-sessions objective"
+  jq -e '.result.pass and .value >= 1' <<<"$upf" >/dev/null || fail "upf: upf-sessions objective failed: $upf"
+  jq -e '.pass == true' <<<"$raw" >/dev/null ||
+    fail "scenario 10: open5gs-slo Analysis on a healthy lab did not pass (score $(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw"))"
+  ANALYSIS_SCORE="$(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw")"
 }
 
 # --- scenarios ---------------------------------------------------------------------------------
@@ -537,41 +505,237 @@ step_happy() {
   mock_dispatches keptn-promote.yaml | tail -n 1 | sed 's/^/    mock: /'
   check_upf_kpis
   result PASS "scenario 1 (happy path): RELEASE_ID $rid -> app version $av Succeeded (tasks, evaluation open5gs-kpis), promotion dispatched (keptn-promote.yaml); UPF sessions > 0, UPFNoUserPlaneTraffic not firing, open5gs-slo upf-sessions objective passed"
+  result PASS "scenario 10 (SLO analysis), healthy: open5gs-slo Analysis passed with score $ANALYSIS_SCORE"
 }
 
 step_fault() {
   start_guard
-  local rb_before pr_before rid av st prom task logs
+  local rb_before pr_before rid
   rb_before="$(mock_dispatches keptn-rollback.yaml | wc -l)"
   pr_before="$(mock_dispatches keptn-promote.yaml | wc -l)"
   log "Scenario 2 (fault): switch Open5GS to values/open5gs-fault-slice.yaml"
   rid="$(release "e2e: inject fault" scripts/inject-fault.sh lab)"
   echo "RELEASE_ID $rid"
-  av="$(wait_appversion "$rid")" || fail "fault: app version for $rid did not finish within ${VERSION_TIMEOUT}s (${av:-not created})"
+  check_fault_release "scenario 2 (fault)" kpi-guard "$rid" "$rb_before" "$pr_before"
+}
+
+# check_fault_release <label> <kpi-guard task definition> <release-id> <rollback dispatches before>
+# <promote dispatches before>: the faulty release's app version fails, the kpi-guard task fails
+# with "rollback requested via Git", the GitHub mock gets one more keptn-rollback.yaml dispatch
+# ({ref: main, stage: lab, source: keptn} with a token) and no promotion runs.
+check_fault_release() {
+  local label=$1 td=$2 rid=$3 rb_before=$4 pr_before=$5 av st prom task tst logs ev d
+  av="$(wait_appversion "$rid")" || fail "$label: app version for $rid did not finish within ${VERSION_TIMEOUT}s (${av:-not created})"
   summarize "$av"
   st="$(av_field "$av" '{.status.status}')"
   prom="$(av_field "$av" '{.status.promotionStatus}')"
-  task="$(task_for "$av" kpi-guard)"
+  task="$(task_for "$av" "$td")"
   # The app version turns Failed as soon as any post-deployment task fails, possibly before
   # kpi-guard has finished; wait for kpi-guard itself.
-  local tst=""
+  tst=""
   [[ -n "$task" ]] && tst="$(wait_task "$task")"
   logs="$( [[ -n "$task" ]] && task_logs "$task" || true)"
-  printf '%s\n' "$logs" | tail -n 8 | sed 's/^/    kpi-guard: /'
+  printf '%s\n' "$logs" | tail -n 8 | sed "s/^/    $td: /"
 
-  [[ "$st" == Failed ]] || fail "fault: app version $av status=$st (want Failed)"
-  [[ "$tst" == Failed ]] || fail "fault: kpi-guard task ${task:-missing} ended ${tst:-unknown} (want Failed)"
-  grep -q 'rollback requested via Git' <<<"$logs" || fail "fault: kpi-guard did not report 'rollback requested via Git'"
-  (( $(mock_dispatches keptn-rollback.yaml | wc -l) > rb_before )) || fail "fault: the GitHub mock got no keptn-rollback.yaml dispatch"
-  local d; d="$(mock_dispatches keptn-rollback.yaml | tail -n 1)"
+  [[ "$st" == Failed ]] || fail "$label: app version $av status=$st (want Failed)"
+  [[ "$tst" == Failed ]] || fail "$label: $td task ${task:-missing} ended ${tst:-unknown} (want Failed)"
+  grep -q 'rollback requested via Git' <<<"$logs" || fail "$label: $td did not report 'rollback requested via Git'"
+  (( $(mock_dispatches keptn-rollback.yaml | wc -l) > rb_before )) || fail "$label: the GitHub mock got no keptn-rollback.yaml dispatch"
+  d="$(mock_dispatches keptn-rollback.yaml | tail -n 1)"
   echo "    mock: $d"
   jq -e '.payload.ref == "main" and .payload.inputs.stage == "lab" and .payload.inputs.source == "keptn" and .authorization' <<<"$d" >/dev/null ||
-    fail "fault: rollback dispatch payload is not {ref: main, stage: lab, source: keptn} with a token"
-  [[ "$prom" != Succeeded ]] || fail "fault: promotion ran for a failed release"
-  (( $(mock_dispatches keptn-promote.yaml | wc -l) == pr_before )) || fail "fault: a keptn-promote.yaml dispatch was sent"
-  local ev; ev="$(av_field "$av" '{.status.postDeploymentEvaluationStatus}')"
-  [[ "$ev" != Succeeded ]] || fail "fault: post-deployment evaluation passed on the faulty release"
-  result PASS "scenario 2 (fault): RELEASE_ID $rid -> app version $av Failed; kpi-guard breach, rollback dispatch requested (keptn-rollback.yaml, source keptn); evaluation $ev; promotion skipped"
+    fail "$label: rollback dispatch payload is not {ref: main, stage: lab, source: keptn} with a token"
+  [[ "$prom" != Succeeded ]] || fail "$label: promotion ran for a failed release"
+  (( $(mock_dispatches keptn-promote.yaml | wc -l) == pr_before )) || fail "$label: a keptn-promote.yaml dispatch was sent"
+  ev="$(av_field "$av" '{.status.postDeploymentEvaluationStatus}')"
+  [[ "$ev" != Succeeded ]] || fail "$label: post-deployment evaluation passed on the faulty release"
+  result PASS "$label: RELEASE_ID $rid -> app version $av Failed; $td breach, rollback dispatch requested (keptn-rollback.yaml, source keptn); evaluation $ev; promotion skipped"
+}
+
+# deploy_age <deployment>: seconds since the newest pod of a Deployment in open5gs started.
+deploy_age() {
+  local sel
+  sel="$(kubectl -n "$NS" get deploy "$1" -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')"
+  kubectl -n "$NS" get pods -l "$sel" -o json |
+    jq -r '[.items[].status.startTime // empty] | sort | last | if . then now - fromdateiso8601 | floor else 0 end'
+}
+
+step_slo() {
+  start_guard
+  local age raw pdu upf amf
+  log "Scenario 10 (SLO analysis) during the fault"
+  # Keptn 0.11's Prometheus provider runs a range query over the Analysis timeframe (recent 10m)
+  # and keeps only its first point, so the result describes the 5m window (args.window) that ended
+  # 10m before the Analysis started. Wait until the faulty SMF has run 10m + 5m (+ margin), so
+  # that window holds only the fault.
+  age="$(deploy_age open5gs-smf)"
+  if (( age < 960 )); then
+    echo "  faulty SMF running for ${age}s; waiting $(( 960 - age ))s (Analysis timeframe 10m + window 5m)"
+    sleep $(( 960 - age ))
+  fi
+  raw="$(run_analysis "scenario 10")"
+  pdu="$(objective "$raw" smf-pdu-success)"
+  upf="$(objective "$raw" upf-sessions)"
+  amf="$(objective "$raw" amf-reg-success)"
+  jq -e '.pass == false' <<<"$raw" >/dev/null ||
+    fail "scenario 10: open5gs-slo Analysis passed during the fault (score $(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw"))"
+  jq -e '.result.pass == false' <<<"$pdu" >/dev/null 2>&1 || fail "scenario 10: smf-pdu-success objective did not fail during the fault: ${pdu:-missing}"
+  jq -e '.result.pass == false' <<<"$upf" >/dev/null 2>&1 || fail "scenario 10: upf-sessions objective did not fail during the fault: ${upf:-missing}"
+  result PASS "scenario 10 (SLO analysis), fault: open5gs-slo Analysis failed with score $(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw"); smf-pdu-success value $(jq -r .value <<<"$pdu") failed, upf-sessions value $(jq -r .value <<<"$upf") failed, amf-reg-success value $(jq -r .value <<<"$amf") pass=$(jq -r .result.pass <<<"$amf")"
+}
+
+step_python() {
+  start_guard
+  local before rid av st post ev prom task tst logs rb_before pr_before
+  before="$(mock_dispatches keptn-promote.yaml | wc -l)"
+  log "Scenario 11 (Python runtime): swap kpi-guard for kpi-guard-py and restore the good config"
+  # One artifact: Flux applies the KeptnAppContext change before helm-controller rolls the NFs.
+  # shellcheck disable=SC2016  # expanded by the inner shell
+  rid="$(release "e2e: kpi-guard-py + heal" bash -c '
+    f=apps/open5gs/keptn/app-context.yaml
+    sed -i "s/postDeploymentTasks: \[traffic-burst, kpi-guard\]/postDeploymentTasks: [traffic-burst, kpi-guard-py]/" "$f"
+    grep -q "postDeploymentTasks: \[traffic-burst, kpi-guard-py\]" "$f" || { echo "could not swap kpi-guard in $f" >&2; exit 1; }
+    scripts/heal.sh lab')"
+  echo "RELEASE_ID $rid"
+  av="$(wait_appversion "$rid")" || fail "python: app version for $rid did not finish within ${VERSION_TIMEOUT}s (${av:-not created})"
+  summarize "$av"
+  st="$(av_field "$av" '{.status.status}')"
+  post="$(av_field "$av" '{.status.postDeploymentStatus}')"
+  ev="$(av_field "$av" '{.status.postDeploymentEvaluationStatus}')"
+  prom="$(av_field "$av" '{.status.promotionStatus}')"
+  task="$(task_for "$av" kpi-guard-py)"
+  [[ -n "$task" ]] || fail "python: no kpi-guard-py task for $av"
+  [[ -z "$(task_for "$av" kpi-guard)" ]] || fail "python: the Deno kpi-guard also ran for $av"
+  tst="$(wait_task "$task")"
+  logs="$(task_logs "$task")"
+  printf '%s\n' "$logs" | tail -n 5 | sed 's/^/    kpi-guard-py: /'
+  [[ "$st" == Succeeded && "$post" == Succeeded && "$ev" == Succeeded ]] ||
+    fail "python: healed app version $av status=$st post=$post evaluation=$ev (want Succeeded)"
+  [[ "$tst" == Succeeded ]] || fail "python: kpi-guard-py task $task ended ${tst:-unknown} (want Succeeded)"
+  grep -q 'KPIs healthy for the full soak window' <<<"$logs" || fail "python: kpi-guard-py did not report healthy KPIs"
+  [[ "$prom" == Succeeded ]] || fail "python: promotion status $prom (want Succeeded)"
+  (( $(mock_dispatches keptn-promote.yaml | wc -l) > before )) || fail "python: no keptn-promote.yaml dispatch for the healed release"
+  result PASS "scenario 11 (Python runtime), healthy: kpi-guard-py in the app context; RELEASE_ID $rid (good config) -> app version $av Succeeded, kpi-guard-py passed, promotion dispatched"
+
+  rb_before="$(mock_dispatches keptn-rollback.yaml | wc -l)"
+  pr_before="$(mock_dispatches keptn-promote.yaml | wc -l)"
+  log "Scenario 11 (Python runtime): repeat scenario 2 under kpi-guard-py"
+  rid="$(release "e2e: inject fault (kpi-guard-py)" scripts/inject-fault.sh lab)"
+  echo "RELEASE_ID $rid"
+  check_fault_release "scenario 11 (Python runtime), fault" kpi-guard-py "$rid" "$rb_before" "$pr_before"
+}
+
+step_rbac() {
+  start_guard
+  local out rc=0
+  log "Scenario 6 (RBAC): check matrix and add-user.sh (scripts/rbac-check.sh)"
+  # Run the copy in the scratch repo, so add-user.sh writes the test user's key and kubeconfig
+  # to $SRC/users (git-ignored there too) and never into the checkout.
+  out="$("$SRC/scripts/rbac-check.sh" all 2>&1)" || rc=$?
+  printf '%s\n' "$out" | sed 's/^/    /'
+  (( rc == 0 )) || fail "scenario 6 (RBAC): $(grep -c '^FAIL' <<<"$out") check(s) failed: $(grep '^FAIL' <<<"$out" | head -n 3 | tr '\n' ';')"
+  result PASS "scenario 6 (RBAC): $(tail -n 1 <<<"$out" | sed 's/^rbac-check: //') (persona matrix, workload identities, add-user.sh certificate for lab:keptn-authors)"
+}
+
+# --- scenario 7: NetworkPolicies -------------------------------------------------------------
+# The probe image is the lab's own pinned kubectl + curl image (traffic-pulse).
+probe_image() { grep -oE 'alpine/k8s:[^ @]+@sha256:[0-9a-f]{64}' "$REPO_ROOT/apps/open5gs/traffic/traffic-pulse.yaml" | head -n 1; }
+
+# probe_pod <namespace>: start (once) a pod "e2e-netprobe" that sleeps, in the given namespace.
+probe_pod() {
+  kubectl -n "$1" get pod e2e-netprobe >/dev/null 2>&1 && return 0
+  kubectl -n "$1" run e2e-netprobe --image="$(probe_image)" --restart=Never \
+    --labels=e2e=netprobe --command -- sleep 3600 >/dev/null
+  kubectl -n "$1" wait --for=condition=Ready pod/e2e-netprobe --timeout=3m >/dev/null
+}
+
+# http_from <namespace> <url>: HTTP status from the probe pod, or "blocked" when the connection
+# does not complete within 5 s (a NetworkPolicy drops the packets).
+http_from() {
+  local code
+  code="$(kubectl -n "$1" exec e2e-netprobe -- curl -sS -o /dev/null -m 5 -w '%{http_code}' "$2" 2>/dev/null)" || true
+  [[ "$code" =~ ^[1-5][0-9][0-9]$ ]] && echo "$code" || echo blocked
+}
+
+# http_as_pod <namespace> <pod> <url>: HTTP status of a request made from inside an existing pod's
+# network namespace (an ephemeral debug container), so NetworkPolicies see that pod's labels.
+http_as_pod() {
+  local c="netcheck-$RANDOM" code=""
+  kubectl -n "$1" debug "pod/$2" --image="$(probe_image)" --profile=general -c "$c" --quiet -- \
+    curl -sS -o /dev/null -m 5 -w '%{http_code}' "$3" >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do
+    if [[ -n "$(kubectl -n "$1" get pod "$2" -o json | jq -r --arg c "$c" '.status.ephemeralContainerStatuses[]? | select(.name == $c) | .state.terminated.reason // empty')" ]]; then
+      code="$(kubectl -n "$1" logs "$2" -c "$c" 2>/dev/null)"
+      break
+    fi
+    sleep 2
+  done
+  [[ "$code" =~ ^[1-5][0-9][0-9]$ ]] && echo "$code" || echo blocked
+}
+
+step_netpol() {
+  start_guard
+  local amf relay prom got am targets down bad sctp ngap regs gnb
+  amf="http://open5gs-amf-metrics.$NS.svc:9090/metrics"
+  relay="http://alert-relay.$NS.svc:8080/healthz"
+  prom="http://kube-prometheus-stack-prometheus.observability.svc:9090/-/ready"
+  log "Scenario 7 (NetworkPolicy, CNI=$CNI)"
+  probe_pod default
+  probe_pod "$NS"
+
+  # Denied: anything outside open5gs and observability reaching the 5G core or Prometheus.
+  for u in "$amf" "$relay" "$prom"; do
+    got="$(http_from default "$u")"
+    echo "    default -> $u: $got"
+    [[ "$got" == blocked ]] || fail "scenario 7: namespace default reached $u (HTTP $got); want blocked"
+  done
+  # Allowed (and a control that the services answer at all): from inside open5gs.
+  for u in "$amf" "$prom"; do
+    got="$(http_from "$NS" "$u")"
+    echo "    $NS -> $u: $got"
+    [[ "$got" == 200 ]] || fail "scenario 7: $NS could not reach $u ($got); want 200"
+  done
+  # Alertmanager -> alert-relay (mission control) is allowed.
+  am="$(kubectl -n observability get pods -l app.kubernetes.io/name=alertmanager -o name | head -n 1)"
+  [[ -n "$am" ]] || fail "scenario 7: no Alertmanager pod"
+  got="$(http_as_pod observability "${am#pod/}" "$relay")"
+  echo "    alertmanager -> $relay: $got"
+  [[ "$got" == 200 ]] || fail "scenario 7: Alertmanager could not reach the alert relay ($got); want 200"
+  # Prometheus still scrapes the AMF, SMF and UPF.
+  targets="$(prom_api '/api/v1/targets?state=active' |
+    jq -c --arg ns "$NS" '[.data.activeTargets[] | select(.labels.namespace == $ns) | {job: .labels.job, health}]')" ||
+    fail "scenario 7: Prometheus targets query failed"
+  echo "    Prometheus targets in $NS: $(jq -r 'map("\(.job)=\(.health)") | join(" ")' <<<"$targets")"
+  down="$(jq '[.[] | select(.health != "up")] | length' <<<"$targets")"
+  for nf in amf smf upf; do
+    jq -e --arg nf "$nf" 'any(.[]; (.job | test($nf)) and .health == "up")' <<<"$targets" >/dev/null ||
+      fail "scenario 7: no healthy Prometheus target for $nf in $NS"
+  done
+  (( down == 0 )) || fail "scenario 7: $down Prometheus target(s) in $NS not up"
+  # Keptn metric queries (metrics operator in keptn-system -> Prometheus) still work.
+  bad="$(kubectl -n "$NS" get keptnmetrics.metrics.keptn.sh -o json |
+    jq -r '[.items[] | select((.status.value // "") == "" or (.status.errMsg // "") != "") | .metadata.name] | join(",")')"
+  [[ -z "$bad" ]] || fail "scenario 7: KeptnMetrics without a value or with an error: $bad"
+  echo "    KeptnMetrics: $(kubectl -n "$NS" get keptnmetrics.metrics.keptn.sh -o json | jq -r '[.items[] | "\(.metadata.name)=\(.status.value)"] | join(" ")')"
+
+  sctp=""
+  if [[ "$CNI" == cilium ]]; then
+    # SCTP: Cilium runs with SCTP enabled, the AMF's NGAP Service is SCTP, and UEs are registered,
+    # which needs the gNB's NG Setup over that SCTP association.
+    [[ "$(kubectl -n kube-system get cm cilium-config -o jsonpath='{.data.enable-sctp}')" == true ]] ||
+      fail "scenario 7: Cilium runs without enable-sctp=true"
+    ngap="$(kubectl -n "$NS" get svc open5gs-amf-ngap -o jsonpath='{.spec.ports[0].protocol}/{.spec.ports[0].port}')"
+    [[ "$ngap" == SCTP/38412 ]] || fail "scenario 7: Service open5gs-amf-ngap is $ngap (want SCTP/38412)"
+    regs="$(prom_api "/api/v1/query?query=$(jq -rn '"sum(fivegs_amffunction_rm_registeredsubnbr)" | @uri')" |
+      jq -r '.data.result[0].value[1] // "0"')" || fail "scenario 7: Prometheus query failed"
+    gnb="$(kubectl -n "$NS" logs deploy/ueransim-gnb --tail=-1 2>/dev/null | grep -i 'NG Setup procedure is successful' | tail -n 1 || true)"
+    echo "    cilium enable-sctp=true; open5gs-amf-ngap $ngap; registered UEs $regs; gNB: ${gnb:-no NG Setup line in the current log}"
+    awk -v r="$regs" 'BEGIN { exit !(r + 0 >= 1) }' || fail "scenario 7: no registered UE over the SCTP NGAP association (fivegs_amffunction_rm_registeredsubnbr=$regs)"
+    sctp="; SCTP: Cilium enable-sctp, NGAP SCTP/38412, $regs UE(s) registered"
+  fi
+  kubectl -n default delete pod e2e-netprobe --wait=false >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete pod e2e-netprobe --wait=false >/dev/null 2>&1 || true
+  result PASS "scenario 7 (NetworkPolicy, CNI=$CNI): default -> AMF metrics, alert-relay, Prometheus blocked; open5gs -> AMF metrics, Prometheus allowed; Alertmanager -> alert-relay allowed; Prometheus targets up; KeptnMetrics updating$sctp"
 }
 
 step_diag() {
@@ -601,8 +765,12 @@ step_all() {
   step_flux
   step_wait
   step_baseline
+  step_rbac
+  if [[ "$CNI" == cilium ]]; then step_netpol; fi
   step_happy
   step_fault
+  step_slo
+  step_python
 }
 
 (( $# )) || { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2; }
@@ -611,7 +779,7 @@ mkdir -p "$E2E_DIR"
 trap 'stop_guard' EXIT
 while (( $# )); do
   case "$1" in
-    up | flux | wait | baseline | happy | fault | down | memory | all) "step_$1" ;;
+    up | flux | wait | baseline | rbac | netpol | happy | fault | slo | python | down | memory | all) "step_$1" ;;
     diag) step_diag "${2:-}"; [[ $# -gt 1 ]] && shift ;;
     *) die "unknown step: $1" ;;
   esac

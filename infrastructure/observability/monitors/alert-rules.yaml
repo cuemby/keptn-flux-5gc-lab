@@ -8,20 +8,21 @@ spec:
   groups:
     - name: open5gs
       rules:
+        # The success-ratio rules need at least 3 failed requests in the window (as kpi-guard's
+        # minFailedRequests): traffic-pulse restarting the lab's 2 UEs aborts one or two
+        # registrations, which alone push a ratio over a handful of requests below 0.9.
         - alert: AMFRegistrationSuccessLow
           expr: |
-            (sum(increase(fivegs_amffunction_rm_reginitsucc[5m]))
-              / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[5m])), 1)) < 0.95
-            and sum(increase(fivegs_amffunction_rm_reginitreq[5m])) > 0
+            ((sum(increase(fivegs_amffunction_rm_reginitsucc[5m])) or vector(0)) / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[5m])), 1)) < 0.95
+            and (sum(increase(fivegs_amffunction_rm_reginitreq[5m])) - (sum(increase(fivegs_amffunction_rm_reginitsucc[5m])) or vector(0))) >= 3
           for: 5m
           labels: { severity: warning }
           annotations:
             summary: "AMF initial registration success below 95% over 5m"
         - alert: SMFPduSessionSuccessLow
           expr: |
-            (sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m]))
-              / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])), 1)) < 0.95
-            and sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])) > 0
+            ((sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m])) or vector(0)) / clamp_min(sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])), 1)) < 0.95
+            and (sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[5m])) - (sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[5m])) or vector(0))) >= 3
           for: 5m
           labels: { severity: warning }
           annotations:
@@ -44,9 +45,8 @@ spec:
         # action="rollback" to alert-relay, which requests the same Git rollback as Keptn.
         - alert: Open5GSDegradedAfterRelease
           expr: |
-            (sum(increase(fivegs_amffunction_rm_reginitsucc[10m]))
-              / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[10m])), 1)) < 0.90
-            and sum(increase(fivegs_amffunction_rm_reginitreq[10m])) > 0
+            ((sum(increase(fivegs_amffunction_rm_reginitsucc[10m])) or vector(0)) / clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[10m])), 1)) < 0.90
+            and (sum(increase(fivegs_amffunction_rm_reginitreq[10m])) - (sum(increase(fivegs_amffunction_rm_reginitsucc[10m])) or vector(0))) >= 3
           for: 15m
           labels: { severity: critical, action: rollback }
           annotations:
