@@ -17,9 +17,11 @@
 #   up          create the Kind cluster "kfl-e2e" (light profile) and the local registry
 #   flux        install Flux, push the tree, create the Secrets and the GitHub mock
 #   wait        wait until every Flux Kustomization and HelmRelease is Ready
-#   baseline    wait for the first Keptn app version to finish and record its result
+#   baseline    the first Keptn app version after the install succeeds (no rollback requested)
+#               and Keptn manages only the four NFs (amf, smf, nssf, upf)
 #   happy       scenario 1: bump RELEASE_ID; the app version succeeds, evaluation passes,
-#               promotion dispatched
+#               promotion dispatched; the UPF holds PDU sessions, UPFNoUserPlaneTraffic is not
+#               firing and an open5gs-slo Analysis passes its upf-sessions objective
 #   fault       scenario 2: faulty config (SMF DNN mismatch); kpi-guard fails and requests a
 #               rollback, promotion skipped
 #   diag [dir]  collect diagnostics (scripts/collect-diagnostics.sh)
@@ -345,8 +347,7 @@ step_wait() {
 release_id() { sed -nE 's/^[[:space:]]*RELEASE_ID:[[:space:]]*"([^"]+)".*/\1/p' "$SRC/clusters/lab/apps.yaml"; }
 
 # appversion_for <release-id>: newest KeptnAppVersion of app open5gs in which the four tracked
-# NFs (amf, smf, nssf, upf) carry that version. The app has a fifth workload: Keptn also adopts
-# the chart's open5gs-populate pod (label app.kubernetes.io/name=open5gs, version 2.8.0).
+# NFs (amf, smf, nssf, upf) carry that version.
 appversion_for() {
   kubectl -n "$NS" get keptnappversions.lifecycle.keptn.sh -o json | jq -r --arg v "$1" '
     [.items[] | select(.spec.appName == "open5gs")
@@ -437,17 +438,79 @@ release() {
   release_id
 }
 
+# prom_api <path>: GET from the Prometheus HTTP API through a short-lived port-forward to the
+# Prometheus pod. The Prometheus image ships no wget/curl, and a port-forward reaches the pod's
+# localhost, so the observability NetworkPolicies do not apply.
+prom_api() {
+  local pod pf rc=0
+  pod="$(kubectl -n observability get pods -l app.kubernetes.io/name=prometheus -o name | head -n 1)"
+  [[ -n "$pod" ]] || return 1
+  kubectl -n observability port-forward --address 127.0.0.1 "$pod" 19090:9090 >/dev/null 2>&1 &
+  pf=$!
+  curl -fsS --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:19090$1" || rc=$?
+  kill "$pf" 2>/dev/null || true
+  wait "$pf" 2>/dev/null || true
+  return "$rc"
+}
+
+# check_upf_kpis: the UPF user-plane KPIs read UPF PDU sessions (fivegs_upffunction_upf_sessionnbr),
+# not the N3 GTP-U counter Open5GS 2.8.0 never increments. On a healthy lab: the UPF holds
+# sessions, UPFNoUserPlaneTraffic is loaded on that metric and not firing, and a one-shot
+# open5gs-slo Analysis (examples/analysis-run.yaml) passes its upf-sessions objective.
+check_upf_kpis() {
+  local q sessions rule an deadline state raw upf
+  q="$(jq -rn '"sum(fivegs_upffunction_upf_sessionnbr)" | @uri')"
+  sessions="$(prom_api "/api/v1/query?query=$q" | jq -r '.data.result[0].value[1] // "none"')" ||
+    fail "upf: Prometheus query failed"
+  echo "    UPF PDU sessions: $sessions"
+  awk -v s="$sessions" 'BEGIN { exit !(s + 0 >= 1) }' || fail "upf: sum(fivegs_upffunction_upf_sessionnbr)=$sessions (want >= 1)"
+
+  rule="$(prom_api "/api/v1/rules?type=alert" |
+    jq -c '[.data.groups[].rules[] | select(.name == "UPFNoUserPlaneTraffic")][0] // empty')" ||
+    fail "upf: Prometheus rules query failed"
+  [[ -n "$rule" ]] || fail "upf: alert UPFNoUserPlaneTraffic is not loaded in Prometheus"
+  echo "    UPFNoUserPlaneTraffic: state=$(jq -r .state <<<"$rule") health=$(jq -r .health <<<"$rule")"
+  jq -e '.query | contains("fivegs_upffunction_upf_sessionnbr")' <<<"$rule" >/dev/null ||
+    fail "upf: UPFNoUserPlaneTraffic does not read fivegs_upffunction_upf_sessionnbr"
+  jq -e '.health == "ok" and .state != "firing"' <<<"$rule" >/dev/null ||
+    fail "upf: UPFNoUserPlaneTraffic is $(jq -r '"\(.state)/\(.health)"' <<<"$rule") on a healthy lab (want not firing, health ok)"
+
+  an="$(kubectl create -f "$REPO_ROOT/examples/analysis-run.yaml" -o name)" || fail "upf: could not create the open5gs-slo Analysis"
+  deadline=$(( SECONDS + 300 ))
+  until state="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.state}')"; [[ "$state" == Completed ]]; do
+    (( SECONDS < deadline )) || fail "upf: $an not Completed after 300s (state ${state:-none})"
+    sleep 10
+  done
+  raw="$(kubectl -n "$NS" get "$an" -o jsonpath='{.status.raw}')"
+  jq -r '.objectiveResults[] | "    analysis \(.objective.analysisValueTemplateRef.name): value=\(.value) pass=\(.result.pass)"' <<<"$raw"
+  echo "    analysis ${an#*/}: pass=$(jq -r .pass <<<"$raw") warning=$(jq -r .warning <<<"$raw") score=$(jq -r '"\(.totalScore)/\(.maximumScore)"' <<<"$raw")"
+  upf="$(jq -c '[.objectiveResults[] | select(.objective.analysisValueTemplateRef.name == "upf-sessions")][0] // empty' <<<"$raw")"
+  [[ -n "$upf" ]] || fail "upf: $an has no upf-sessions objective"
+  jq -e '.result.pass and .value >= 1' <<<"$upf" >/dev/null || fail "upf: $an upf-sessions objective failed: $upf"
+}
+
 # --- scenarios ---------------------------------------------------------------------------------
 step_baseline() {
   start_guard
-  local rid av st
+  local rid av st task apps wls
   rid="$(release_id)"
   log "Baseline: first Keptn app version (RELEASE_ID $rid)"
   av="$(wait_appversion "$rid")" || fail "baseline: app version for $rid did not finish within ${VERSION_TIMEOUT}s (${av:-not created})"
   summarize "$av"
   st="$(av_field "$av" '{.status.status}')"
-  # Recorded, not asserted: the first release races Prometheus target discovery on a fresh cluster.
-  result INFO "baseline: first app version $av for $rid finished with status $st"
+  task="$(task_for "$av" kpi-guard)"
+  [[ -n "$task" ]] && task_logs "$task" | tail -n 5 | sed 's/^/    kpi-guard: /'
+  # Keptn's pod webhook only selects pods labelled keptn.sh/workload: no auto-apps for MongoDB,
+  # populate, the other NFs, UERANSIM or alert-relay, and no fifth workload in the open5gs app.
+  apps="$(kubectl -n "$NS" get keptnapps.lifecycle.keptn.sh -o json | jq -r '[.items[].metadata.name] | sort | join(",")')"
+  wls="$(kubectl -n "$NS" get keptnworkloads.lifecycle.keptn.sh -o json | jq -r '[.items[].metadata.name] | sort | join(",")')"
+  echo "  Keptn apps: $apps; workloads: $wls"
+  [[ "$apps" == open5gs ]] || fail "baseline: Keptn apps $apps (want only open5gs)"
+  [[ "$wls" == open5gs-amf,open5gs-nssf,open5gs-smf,open5gs-upf ]] ||
+    fail "baseline: Keptn workloads $wls (want the four NFs only)"
+  (( $(mock_dispatches keptn-rollback.yaml | wc -l) == 0 )) || fail "baseline: a rollback was requested for the first release"
+  [[ "$st" == Succeeded ]] || fail "baseline: first app version $av status=$st (want Succeeded)"
+  result PASS "baseline: first app version $av for $rid Succeeded with no rollback request; Keptn manages only amf, smf, nssf, upf"
 }
 
 step_happy() {
@@ -472,7 +535,8 @@ step_happy() {
   n="$(mock_dispatches keptn-promote.yaml | wc -l)"
   (( n > before )) || fail "happy: promote task succeeded but the GitHub mock got no keptn-promote.yaml dispatch"
   mock_dispatches keptn-promote.yaml | tail -n 1 | sed 's/^/    mock: /'
-  result PASS "scenario 1 (happy path): RELEASE_ID $rid -> app version $av Succeeded (tasks, evaluation open5gs-kpis), promotion dispatched (keptn-promote.yaml)"
+  check_upf_kpis
+  result PASS "scenario 1 (happy path): RELEASE_ID $rid -> app version $av Succeeded (tasks, evaluation open5gs-kpis), promotion dispatched (keptn-promote.yaml); UPF sessions > 0, UPFNoUserPlaneTraffic not firing, open5gs-slo upf-sessions objective passed"
 }
 
 step_fault() {
