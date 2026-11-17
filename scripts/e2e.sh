@@ -41,14 +41,13 @@
 #   memory      print the memory summary
 #   down        delete the cluster and the registry
 #   all         up flux wait baseline rbac [netpol] happy fault slo python, then down (diagnostics
-#               on failure); netpol runs when CNI=cilium or E2E_NETPOL=1
+#               on failure); netpol runs when CNI=cilium
 #
 # Environment:
 #   E2E_DIR             state directory (default ${TMPDIR:-/tmp}/kfl-e2e): scratch repo,
 #                       kubeconfig, memory log, results
 #   PROFILE             light (default) or full
 #   CNI                 kindnet (default) or cilium (kind/cluster*-cilium.yaml + Cilium with SCTP)
-#   E2E_NETPOL=1        `all`: run the netpol step with kindnet too
 #   REGISTRY_PORT       host port of the local registry (default 5001)
 #   E2E_MIN_AVAIL_MIB   do not create the cluster below this much available memory (default 6144,
 #                       the light-profile figure from scripts/bootstrap.sh); Linux only
@@ -555,11 +554,10 @@ check_fault_release() {
 
 # deploy_age <deployment>: seconds since the newest pod of a Deployment in open5gs started.
 deploy_age() {
-  local sel start
+  local sel
   sel="$(kubectl -n "$NS" get deploy "$1" -o json | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')"
-  start="$(kubectl -n "$NS" get pods -l "$sel" -o json | jq -r '[.items[].status.startTime // empty] | sort | last // empty')"
-  [[ -n "$start" ]] || { echo 0; return; }
-  echo $(( $(date -u +%s) - $(date -u -d "$start" +%s) ))
+  kubectl -n "$NS" get pods -l "$sel" -o json |
+    jq -r '[.items[].status.startTime // empty] | sort | last | if . then now - fromdateiso8601 | floor else 0 end'
 }
 
 step_slo() {
@@ -768,7 +766,7 @@ step_all() {
   step_wait
   step_baseline
   step_rbac
-  [[ "$CNI" == cilium || "${E2E_NETPOL:-0}" == 1 ]] && step_netpol
+  if [[ "$CNI" == cilium ]]; then step_netpol; fi
   step_happy
   step_fault
   step_slo

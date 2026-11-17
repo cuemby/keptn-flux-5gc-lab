@@ -218,7 +218,7 @@ Scenarios beyond the happy path and the fault:
   request from an ephemeral container in the Alertmanager pod); Prometheus targets in `open5gs` are
   up and the KeptnMetrics update. With `CNI=cilium` it also checks SCTP: Cilium's `enable-sctp`, the
   AMF's NGAP Service on SCTP/38412 and registered UEs, which need NG Setup over that association.
-  `all` runs it with Cilium, or with kindnet when `E2E_NETPOL=1`.
+  `all` runs it only with Cilium.
 - 10 (`happy`, then `slo` after the fault): the `open5gs-slo` Analysis passes on the healthy lab
   and fails during the fault, with the `smf-pdu-success` and `upf-sessions` objectives failing.
 - 11 (`python`): `kpi-guard` is swapped for `kpi-guard-py` in the app context together with

@@ -37,7 +37,6 @@
 #                       results.md, memory.log
 #   LIVE_MIN_AVAIL_MIB  refuse to start below this much available memory (default 6144); Linux only
 #   LIVE_MEM_FLOOR_MIB  stop the run below this much available memory (default 1024); Linux only
-#   LIVE_SCENARIOS      scenarios to run, in this order (default "promote rollback mission loop-guard")
 #   LIVE_DIAG_DIR       when set and the run fails, scripts/collect-diagnostics.sh writes the
 #                       cluster state there before the cluster is deleted (no Secrets)
 #
@@ -53,7 +52,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIVE_DIR="${LIVE_DIR:-${TMPDIR:-/tmp}/kfl-live}"
 LIVE_MIN_AVAIL_MIB="${LIVE_MIN_AVAIL_MIB:-6144}"
 LIVE_MEM_FLOOR_MIB="${LIVE_MEM_FLOOR_MIB:-1024}"
-LIVE_SCENARIOS="${LIVE_SCENARIOS:-promote rollback mission loop-guard}"
 CLUSTER=keptn-5gc            # name: in kind/cluster.yaml, used by scripts/bootstrap.sh
 CLONE="$LIVE_DIR/repo"
 STAGE=lab
@@ -85,9 +83,6 @@ OWNER="${TARGET%%/*}"
 REPO="${TARGET#*/}"
 [[ "$REPO" == *-sandbox || "${LIVE_ALLOW_ANY_REPO:-0}" == 1 ]] ||
   die "$TARGET does not end in -sandbox; the run pushes to its main branch (set LIVE_ALLOW_ANY_REPO=1 to override)"
-for s in $LIVE_SCENARIOS; do
-  case "$s" in promote | rollback | mission | loop-guard) ;; *) die "unknown scenario in LIVE_SCENARIOS: $s" ;; esac
-done
 
 for t in kind kubectl flux git curl jq docker openssl; do command -v "$t" >/dev/null 2>&1 || die "missing tool: $t"; done
 [[ -f "$CREDS" && -r "$CREDS" ]] || die "credentials file $CREDS not found or not readable"
@@ -526,13 +521,9 @@ scenario_loop_guard() {
 # --- main ------------------------------------------------------------------------------------------
 SINCE_SETUP="$(now_iso)"
 setup
-for s in $LIVE_SCENARIOS; do
-  case "$s" in
-    promote) scenario_promote ;;
-    rollback) scenario_rollback ;;
-    mission) scenario_mission ;;
-    loop-guard) scenario_loop_guard ;;
-  esac
-done
+scenario_promote
+scenario_rollback
+scenario_mission
+scenario_loop_guard
 log "Results"
 cat "$LIVE_DIR/results.md"

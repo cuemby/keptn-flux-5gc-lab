@@ -14,11 +14,6 @@ name: live-github-check
 # The tokens reach the script through a mode-600 file that the script deletes when it ends.
 on:
   workflow_dispatch:
-    inputs:
-      scenarios:
-        description: Scenarios to run, in this order
-        type: string
-        default: promote rollback mission loop-guard
 
 permissions: {}
 
@@ -53,7 +48,6 @@ jobs:
         env:
           BOOT: ${{ secrets.LIVE_BOOTSTRAP_TOKEN }}
           DISPATCH: ${{ secrets.LIVE_DISPATCH_TOKEN }}
-          LIVE_SCENARIOS: ${{ inputs.scenarios }}
           TARGET: ${{ github.repository }}
         run: |
           [[ -n "$BOOT" && -n "$DISPATCH" ]] ||
