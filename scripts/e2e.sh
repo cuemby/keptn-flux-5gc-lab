@@ -20,8 +20,8 @@
 #   baseline    wait for the first Keptn app version to finish and record its result
 #   happy       scenario 1: bump RELEASE_ID; the app version succeeds, evaluation passes,
 #               promotion dispatched
-#   fault       scenario 2: faulty slice config; kpi-guard fails and requests a rollback,
-#               promotion skipped
+#   fault       scenario 2: faulty config (SMF DNN mismatch); kpi-guard fails and requests a
+#               rollback, promotion skipped
 #   diag [dir]  collect diagnostics (scripts/collect-diagnostics.sh)
 #   memory      print the memory summary
 #   down        delete the cluster and the registry
