@@ -25,6 +25,11 @@ spec:
         pollSeconds: "30"
         minRegSuccess: "0.95"
         minPduSuccess: "0.95"
+        # A ratio below its minimum is a breach only when at least this many requests in the 2m
+        # window failed (requests - successes). With the light profile's 2 UEs a window holds a few
+        # requests, so one registration counted on one side of a window edge, or a counter series
+        # that appears at its first value, reads 0.5; a real fault fails every retry and exceeds it.
+        minFailedRequests: "3"
         rollbackWorkflow: "keptn-rollback.yaml"
         stage: "lab"
     secureParameters:
@@ -53,6 +58,7 @@ spec:
         }
 
         const REQ = "sum(increase(fivegs_amffunction_rm_reginitreq[2m]))";
+        const REGOK = "sum(increase(fivegs_amffunction_rm_reginitsucc[2m])) or vector(0)";
         const REG = "sum(increase(fivegs_amffunction_rm_reginitsucc[2m])) / " +
           "clamp_min(sum(increase(fivegs_amffunction_rm_reginitreq[2m])), 1)";
         const PDU = "sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[2m])) / " +
@@ -61,6 +67,7 @@ spec:
         // never increments it (stays 0 while UE pings pass), so active UPF sessions stand in.
         const SESS = "sum(fivegs_upffunction_upf_sessionnbr)";
         const PDUREQ = "sum(increase(fivegs_smffunction_sm_pdusessioncreationreq[2m]))";
+        const PDUOK = "sum(increase(fivegs_smffunction_sm_pdusessioncreationsucc[2m])) or vector(0)";
 
         console.log(`warm-up: waiting ${data.warmupSeconds ?? 0}s for the new release's traffic`);
         await new Promise((r) => setTimeout(r, Number(data.warmupSeconds ?? 0) * 1000));
@@ -74,12 +81,19 @@ spec:
             const pdu = await query(PDU);
             const sessions = await query(SESS);
             const pduReq = await query(PDUREQ);
-            console.log(JSON.stringify({ req, reg, pduReq, pdu, sessions }));
-            // "!(x >= min)" also treats a missing sample or failed query (NaN) as a breach. The PDU
-            // ratio only counts when the SMF saw requests: a fresh SMF's counter series appears at
-            // its first value, so increase() reads 0 for a while; sessions catches a dead user plane.
-            const pduBad = pduReq > 0 && !(pdu >= Number(data.minPduSuccess));
-            const bad = !(reg >= Number(data.minRegSuccess)) || pduBad || !(sessions > 0);
+            const regFailed = req - await query(REGOK);
+            const pduFailed = pduReq - await query(PDUOK);
+            console.log(JSON.stringify({ req, reg, regFailed, pduReq, pdu, pduFailed, sessions }));
+            // A sample is a breach when registration success is below minRegSuccess, PDU session
+            // success is below minPduSuccess, or the UPF holds no session (a dead user plane). A low
+            // ratio counts only with at least minFailedRequests failed requests in the window (see
+            // the parameter). "!(x >= min)" and "!(failed < n)" also treat a failed query (NaN) as a
+            // breach. The PDU ratio only counts when the SMF saw requests: a fresh SMF's counter
+            // series appears at its first value, so increase() reads 0 for a while.
+            const minFailed = Number(data.minFailedRequests);
+            const regBad = !(reg >= Number(data.minRegSuccess)) && !(regFailed < minFailed);
+            const pduBad = pduReq > 0 && !(pdu >= Number(data.minPduSuccess)) && !(pduFailed < minFailed);
+            const bad = regBad || pduBad || !(sessions > 0);
             breaches = bad ? breaches + 1 : 0;
             if (breaches >= 2) break;
           } else {

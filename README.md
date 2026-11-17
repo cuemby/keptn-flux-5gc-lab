@@ -191,8 +191,8 @@ memory falls below `E2E_MEM_FLOOR_MIB` (default 1024); `scripts/e2e.sh all` (and
 workflow's always-run `down` step) then deletes the cluster, while single steps leave it for
 `scripts/e2e.sh down`. A full run takes about
 35 minutes on a laptop-class host (about 15 of them until everything is Ready). The first Keptn
-app version after a fresh install is recorded but not asserted: its traffic task starts before
-UERANSIM is installed, so it fails and kpi-guard requests a rollback.
+app version after a fresh install must succeed too: its traffic task waits for UERANSIM, which
+Flux installs only after Open5GS is Ready.
 
 The `e2e` workflow runs the same steps on every pull request on a GitHub-hosted runner and uploads
 diagnostics (`scripts/collect-diagnostics.sh`) when a step fails. Not covered there: the GitHub

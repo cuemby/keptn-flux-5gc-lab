@@ -20,7 +20,9 @@ spec:
 ---
 apiVersion: metrics.keptn.sh/v1
 kind: AnalysisValueTemplate
-metadata: { name: upf-n3-rate, namespace: open5gs }
+metadata: { name: upf-sessions, namespace: open5gs }
 spec:
   provider: { name: prometheus }
-  query: "sum(rate(fivegs_ep_n3_gtp_indatapktn3upf[{{.window}}]))"
+  # PDU sessions the UPF held in the window. Not the N3 packet counter: Open5GS 2.8.0 exports
+  # fivegs_ep_n3_gtp_indatapktn3upf but never increments it.
+  query: "sum(max_over_time(fivegs_upffunction_upf_sessionnbr[{{.window}}]))"

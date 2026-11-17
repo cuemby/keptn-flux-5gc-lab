@@ -17,7 +17,8 @@
 #   up          create the Kind cluster "kfl-e2e" (light profile) and the local registry
 #   flux        install Flux, push the tree, create the Secrets and the GitHub mock
 #   wait        wait until every Flux Kustomization and HelmRelease is Ready
-#   baseline    wait for the first Keptn app version to finish and record its result
+#   baseline    the first Keptn app version after the install succeeds (no rollback requested)
+#               and Keptn manages only the four NFs (amf, smf, nssf, upf)
 #   happy       scenario 1: bump RELEASE_ID; the app version succeeds, evaluation passes,
 #               promotion dispatched
 #   fault       scenario 2: faulty config (SMF DNN mismatch); kpi-guard fails and requests a
@@ -345,8 +346,7 @@ step_wait() {
 release_id() { sed -nE 's/^[[:space:]]*RELEASE_ID:[[:space:]]*"([^"]+)".*/\1/p' "$SRC/clusters/lab/apps.yaml"; }
 
 # appversion_for <release-id>: newest KeptnAppVersion of app open5gs in which the four tracked
-# NFs (amf, smf, nssf, upf) carry that version. The app has a fifth workload: Keptn also adopts
-# the chart's open5gs-populate pod (label app.kubernetes.io/name=open5gs, version 2.8.0).
+# NFs (amf, smf, nssf, upf) carry that version.
 appversion_for() {
   kubectl -n "$NS" get keptnappversions.lifecycle.keptn.sh -o json | jq -r --arg v "$1" '
     [.items[] | select(.spec.appName == "open5gs")
@@ -440,14 +440,25 @@ release() {
 # --- scenarios ---------------------------------------------------------------------------------
 step_baseline() {
   start_guard
-  local rid av st
+  local rid av st task apps wls
   rid="$(release_id)"
   log "Baseline: first Keptn app version (RELEASE_ID $rid)"
   av="$(wait_appversion "$rid")" || fail "baseline: app version for $rid did not finish within ${VERSION_TIMEOUT}s (${av:-not created})"
   summarize "$av"
   st="$(av_field "$av" '{.status.status}')"
-  # Recorded, not asserted: the first release races Prometheus target discovery on a fresh cluster.
-  result INFO "baseline: first app version $av for $rid finished with status $st"
+  task="$(task_for "$av" kpi-guard)"
+  [[ -n "$task" ]] && task_logs "$task" | tail -n 5 | sed 's/^/    kpi-guard: /'
+  # Keptn's pod webhook only selects pods labelled keptn.sh/workload: no auto-apps for MongoDB,
+  # populate, the other NFs, UERANSIM or alert-relay, and no fifth workload in the open5gs app.
+  apps="$(kubectl -n "$NS" get keptnapps.lifecycle.keptn.sh -o json | jq -r '[.items[].metadata.name] | sort | join(",")')"
+  wls="$(kubectl -n "$NS" get keptnworkloads.lifecycle.keptn.sh -o json | jq -r '[.items[].metadata.name] | sort | join(",")')"
+  echo "  Keptn apps: $apps; workloads: $wls"
+  [[ "$apps" == open5gs ]] || fail "baseline: Keptn apps $apps (want only open5gs)"
+  [[ "$wls" == open5gs-amf,open5gs-nssf,open5gs-smf,open5gs-upf ]] ||
+    fail "baseline: Keptn workloads $wls (want the four NFs only)"
+  (( $(mock_dispatches keptn-rollback.yaml | wc -l) == 0 )) || fail "baseline: a rollback was requested for the first release"
+  [[ "$st" == Succeeded ]] || fail "baseline: first app version $av status=$st (want Succeeded)"
+  result PASS "baseline: first app version $av for $rid Succeeded with no rollback request; Keptn manages only amf, smf, nssf, upf"
 }
 
 step_happy() {
