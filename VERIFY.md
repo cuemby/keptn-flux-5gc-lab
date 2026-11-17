@@ -26,7 +26,7 @@ every script. `make lint` runs actionlint, the SHA-pin check and gitleaks.
 | GitHub runner, `kind-extended` ([run](https://github.com/cuemby/keptn-flux-5gc-lab/actions/runs/44054154313)) | full (3 nodes), kindnet | Green: same scenarios | 5.7 GB |
 | GitHub runner, `kind-extended` ([run](https://github.com/cuemby/keptn-flux-5gc-lab/actions/runs/44054160051)) | light, Cilium 1.20.4 | Green: same scenarios plus 7 (NetworkPolicies, SCTP: `enable-sctp`, NGAP on SCTP/38412, 2 UEs registered) | 6.2 GB |
 | GitHub runner, `e2e` on the last merged pull request ([run](https://github.com/cuemby/keptn-flux-5gc-lab/actions/runs/44116320547)) | light, kindnet | Green | |
-| Sandbox repository, `live-github-check.yaml` ([run](https://github.com/cuemby/keptn-flux-5gc-lab-sandbox/actions/runs/44098309729)) | light, kindnet, real tokens | Green: `flux bootstrap github`; promote on GitHub; scenario 2 with the real rollback commit; scenario 9 (alert fired 16 min after the UDM was scaled to 0, relay dispatch, rollback, drift reverted); scenario 3 (one rollback, then "Needs a human") | runner lowest available 11 GB |
+| Sandbox repository, `live-github-check.yaml` ([run](https://github.com/cuemby/keptn-flux-5gc-lab-sandbox/actions/runs/44098309729)) | light, kindnet, real tokens | Green: `flux bootstrap github`; promote on GitHub; scenario 2 with the real rollback commit; scenario 9 (alert fired 16 min after the UDM was scaled to 0, relay dispatch, rollback, UDM restored by the new Helm release); scenario 3 (one rollback, then "Needs a human") | runner lowest available 11 GB |
 
 The GitHub runner has 4 vCPUs and 16 GB. The first live sandbox run found one more defect (an
 Alertmanager rollback reverted a newer, healthy release); the fix is listed below.
