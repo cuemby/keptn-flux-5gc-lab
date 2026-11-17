@@ -112,7 +112,7 @@ start_guard() {
   mem_guard $$ &
   GUARD_PID=$!
 }
-stop_guard() { [[ -n "$GUARD_PID" ]] && kill "$GUARD_PID" 2>/dev/null; GUARD_PID=""; return 0; }
+stop_guard() { [[ -n "$GUARD_PID" ]] && { kill "$GUARD_PID" 2>/dev/null || true; }; GUARD_PID=""; return 0; }
 
 memory_summary() {
   [[ -s "$E2E_DIR/memory.log" ]] || { echo "no memory samples"; return 0; }
