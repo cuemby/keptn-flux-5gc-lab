@@ -187,7 +187,10 @@ of the `github-dispatch` Secret), so a rollback or promotion is checked as *requ
 `keptn-rollback` and `keptn-promote` workflows do not run. Steps can run one at a time
 (`up`, `flux`, `wait`, `baseline`, `happy`, `fault`, `heal`, `diag`, `down`); see the header of
 the script. It records host and Kind node memory every 15 s and stops (and deletes the cluster)
-when available memory falls below `E2E_MEM_FLOOR_MIB` (default 1024).
+when available memory falls below `E2E_MEM_FLOOR_MIB` (default 1024). A full run takes about
+35 minutes on a laptop-class host (about 15 of them until everything is Ready). The first Keptn
+app version after a fresh install is recorded but not asserted: its traffic task starts before
+UERANSIM is installed, so it fails and kpi-guard requests a rollback.
 
 The `e2e` workflow runs the same steps on every pull request on a GitHub-hosted runner and uploads
 diagnostics (`scripts/collect-diagnostics.sh`) when a step fails. Not covered there: the GitHub
