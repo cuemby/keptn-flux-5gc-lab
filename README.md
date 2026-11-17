@@ -9,8 +9,11 @@ and run it on a laptop with Kind or on any conformant Kubernetes cluster.
 The lab is preparation material for the Sylva hackathon project "Enhancing GitOps with Keptn for
 Autonomous Operations".
 
-> This README is an initial outline. Sections marked *(to be completed)* are filled in as the
-> rest of the lab lands.
+Documentation: [learning goals](docs/learning-goals.md), [architecture](docs/architecture.md),
+[Keptn primer](docs/keptn-primer.md), [scenarios](docs/scenarios.md),
+[observability](docs/observability.md), [security](docs/security.md),
+[troubleshooting](docs/troubleshooting.md), [references](docs/references.md), and
+[VERIFY.md](VERIFY.md) for what has been tested and what turned out different from the design.
 
 ## 1. What this is
 
@@ -35,14 +38,15 @@ Every change is a Git commit, including rollbacks:
 
 ## 2. Learning goals
 
-The lab is organised around nine questions, from "what triggers Keptn to execute a lifecycle
-action?" to "what would it take to integrate Keptn into a real delivery pipeline?". See
-`docs/learning-goals.md` *(to be completed)*.
+The lab is organised around the hackathon's nine questions, from "what triggers Keptn to execute
+a lifecycle action?" to "what would be required to integrate Keptn into a real delivery
+pipeline?". [docs/learning-goals.md](docs/learning-goals.md) maps each question to a file and a
+scenario, and maps hackathon Use-Case One onto the lab.
 
 ## 3. Prerequisites
 
 - Docker or Podman on a cgroup v2 host. A Linux host or Linux VM is needed for the full UE data
-  plane (the UPF and UEs use `/dev/net/tun`).
+  plane (the UPF and UEs use `/dev/net/tun`); the lab is tested on Linux only.
 - [Kind](https://kind.sigs.k8s.io/) v0.33.0 or later, kubectl v1.37, the
   [Flux CLI](https://fluxcd.io/flux/installation/) 2.x (tested pins below), Helm 3 or 4, `openssl`.
   With [mise](https://mise.jdx.dev/), `mise install` in the repository root installs the exact
@@ -91,6 +95,15 @@ To drop Jaeger tracing, remove `tracing.yaml` from that list and commit; Flux pr
    make ui                                # Grafana :3000, Prometheus :9090, Alertmanager :9093, Jaeger :16686
    ```
 
+4. Run the happy path once everything is Ready (about 15 minutes after bootstrap; the first Keptn
+   app version should already have succeeded):
+
+   ```bash
+   kubectl get keptnappversions -n open5gs
+   make bump && git commit -am "chore: bump RELEASE_ID" && git push   # scenario 1
+   make fault                                                          # scenario 2 (commits and pushes)
+   ```
+
 `make up` creates only the Kind cluster; `make down` deletes it.
 
 What the bootstrap does:
@@ -106,15 +119,30 @@ What the bootstrap does:
 
 ## 5. Scenarios
 
-Eleven scenarios, from the happy path (`make bump`) and a Keptn-driven rollback (`make fault`)
-to mission control, SLO analysis and the Python task runtime. See `docs/scenarios.md`
-*(to be completed)*.
+| # | Scenario | Run in the CI e2e |
+|---|---|---|
+| 1 | Happy path: `make bump`, commit, push | yes |
+| 2 | Bad config, Keptn rollback: `make fault` | yes (rollback request at a mock) |
+| 3 | Loop guard | no: live sandbox check |
+| 4 | No traffic | no: by hand |
+| 5 | Flux failure | no: by hand |
+| 6 | RBAC matrix and `add-user.sh` | yes |
+| 7 | NetworkPolicy (and SCTP with Cilium) | nightly Cilium job |
+| 8 | Admission warning on `busybox:latest` | no: by hand |
+| 9 | Mission control: Alertmanager requests the rollback | no: live sandbox check (needs the token and a 15-minute degradation) |
+| 10 | SLO analysis | yes |
+| 11 | Python task runtime | yes |
+
+Steps, expected results and the learning goals each one answers are in
+[docs/scenarios.md](docs/scenarios.md).
 
 ## 6. Personas and adding users
 
 `lab:viewers`, `lab:keptn-authors`, `lab:5gc-operators` and `lab:platform-admins`, with
-`scripts/add-user.sh <name> <group>` issuing 7-day client certificates. See `docs/security.md`
-*(to be completed)*.
+`scripts/add-user.sh <name> <group>` issuing 7-day client certificates. Keptn authors can write
+Keptn objects and read metrics and logs but cannot change the 5G core outside Git; three Deny-mode
+admission policies stop task definitions and scrape configs from borrowing privileged identities or
+Secrets. See [docs/security.md](docs/security.md).
 
 `scripts/rbac-check.sh` runs the check matrix (scenario 6): `kubectl auth can-i` for each persona
 group and for the workload identities (`keptn-traffic`, `keptn-task-runner`, `alert-relay`,
@@ -124,13 +152,42 @@ real certificate for a test user in `lab:keptn-authors` with `add-user.sh`, chec
 
 ## 7. Other clusters
 
-*(to be completed)* OIDC groups instead of client certificates, a Flux `Receiver` instead of
-polling, and Gateway API (never Ingress NGINX) for exposing the UIs.
+The manifests run on any conformant Kubernetes cluster (tested on 1.37; Keptn needs 1.27 or later
+and the admission policies need `admissionregistration.k8s.io/v1`, 1.30 or later).
+`scripts/bootstrap.sh` always uses Kind, so on another cluster run `flux bootstrap github
+--version=v2.10.0 --path=clusters/lab` yourself and create the `open5gs/github-dispatch` and
+`observability/grafana-admin` Secrets the way step 3 of `scripts/bootstrap.sh` does (values
+through stdin). Then change:
+
+- **Users:** map your OIDC groups claim to the four `lab:*` groups in
+  `infrastructure/rbac/bindings.yaml` instead of issuing client certificates.
+- **Faster reconciles:** add a Flux [Receiver](https://fluxcd.io/flux/components/notification/receivers/)
+  so a push triggers reconciliation at once instead of the 1-minute `apps` poll.
+- **Exposure:** publish Grafana, Prometheus, Alertmanager and Jaeger through
+  [Gateway API](https://gateway-api.sigs.k8s.io/) with authentication, never Ingress NGINX
+  (retired) and never without authentication.
+- **Pod Security:** the UPF and UEs need `NET_ADMIN` and `/dev/net/tun`, so `open5gs` stays
+  `privileged`; on a shared cluster give it dedicated nodes.
+- **Branch protection:** `keptn-rollback` and `keptn-promote` push to `main` with
+  `GITHUB_TOKEN`; allow `github-actions[bot]` to push.
+- The lab-only defaults below.
 
 ## 8. Swapping the 5G core
 
-*(to be completed)* Change the Keptn post-renderer targets, the PromQL in metrics, templates and
-`kpi-guard`, and the traffic script.
+Keptn only needs the pod template labels and annotations, a traffic generator and KPIs in
+Prometheus. To use another 5G core (for example a commercial one in the hackathon sandbox), change:
+
+| What | File |
+|---|---|
+| Which Deployments are Keptn workloads (`keptn.sh/workload` label and `keptn.sh/app`, `workload`, `version` annotations) | the `postRenderers` in `apps/open5gs/helmrelease-open5gs.yaml` |
+| The PromQL of the KPIs | `apps/open5gs/keptn/metrics.yaml`, `apps/open5gs/keptn/analysis/value-templates.yaml`, the `REQ`/`REG`/`PDU`/`SESS` queries in `task-kpi-guard*.yaml`, `infrastructure/observability/monitors/alert-rules.yaml`, the Open5GS dashboard |
+| How traffic is generated | `apps/open5gs/keptn/task-traffic-burst.yaml` and `apps/open5gs/traffic/traffic-pulse.yaml` (and the `keptn-traffic` Role) |
+| The release inputs the rollback restores | the values files and `configMapGenerator` in `apps/open5gs/kustomization.yaml`; `.github/workflows/keptn-rollback.yaml` and `validate.yaml` list the same paths |
+| The repository Flux watches | `flux bootstrap` (`GITHUB_OWNER`, `REPO`, `BRANCH`) |
+
+Keep the small-count rule (a success ratio counts as low only with at least 3 failed requests) if
+your traffic generator produces only a few requests per window; see
+[docs/observability.md](docs/observability.md#the-small-count-rule).
 
 ## 9. Lab-only defaults to change for shared clusters
 
@@ -142,6 +199,10 @@ polling, and Gateway API (never Ingress NGINX) for exposing the UIs.
 - The image-pinning and Keptn-version ValidatingAdmissionPolicies run in `Warn` and `Audit` mode
   (the Keptn task-identity and operator Secret-reference policies deny).
 - NetworkPolicies isolate ingress only; egress stays open.
+- `alert-relay` accepts unauthenticated requests from inside the `open5gs` namespace.
+- Users get client certificates, which cannot be revoked before they expire.
+
+See [docs/security.md](docs/security.md#lab-only-defaults-to-change-for-shared-clusters).
 
 ## 10. Version pins
 
@@ -282,7 +343,9 @@ releases and a 15-minute degradation); results and workflow run URLs are written
 
 ## 12. References
 
-See `docs/references.md` *(to be completed)*.
+Keptn v2, Flux, Open5GS, UERANSIM, Prometheus, OpenTelemetry, Jaeger and Kubernetes documentation:
+[docs/references.md](docs/references.md). Most Keptn material online covers Keptn v1; this lab
+uses Keptn v2.5.0.
 
 ## 13. Credits and license
 

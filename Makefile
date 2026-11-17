@@ -75,7 +75,7 @@ down: ## Delete the Kind cluster
 
 ##@ Scenarios (scripts from the apps slice)
 .PHONY: bump fault heal
-bump: ## Bump RELEASE_ID (new Keptn app version), commit and push
+bump: ## Bump RELEASE_ID in clusters/lab/apps.yaml (does not commit; commit and push yourself)
 	scripts/bump-release.sh lab
 
 fault: ## Switch Open5GS to the faulty config (SMF DNN mismatch), commit and push
